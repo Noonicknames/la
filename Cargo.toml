@@ -1,0 +1,17 @@
+[package]
+name = "la"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cblas-sys.workspace = true
+lapacke-sys.workspace = true
+
+cfg-if.workspace = true
+libloading.workspace = true
+thiserror.workspace = true
+glam.workspace = true
+nalgebra = { workspace = true, default-features = false, features = ["macros", "std"]}
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["plotters"]}
