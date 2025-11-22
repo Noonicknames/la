@@ -4,14 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cblas-sys.workspace = true
-lapacke-sys.workspace = true
+cblas-sys = { version = "0.3" }
+lapacke-sys = { version = "0.2" }
 
-cfg-if.workspace = true
-libloading.workspace = true
-thiserror.workspace = true
-glam.workspace = true
-nalgebra = { workspace = true, default-features = false, features = ["macros", "std"]}
-
-[dev-dependencies]
-criterion = { workspace = true, features = ["plotters"]}
+cfg-if = { version = "1.0" }
+libloading = { version = "0.9" }
+thiserror = { version = "2" }
+glam = { version = "0.30" }
+nalgebra = { version = "0.34", default-features = false, features = ["macros", "std"]}
