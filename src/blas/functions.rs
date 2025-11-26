@@ -39,7 +39,7 @@ impl<'a> BlasFunctions<'a> {
                         std::mem::transmute(
                             lib.lib()
                                 .get::<Symbol<$fn_signature>>($symbol)
-                                .expect(&format!("Failed to find `{}`.", str::from_utf8($symbol).unwrap())),
+                                .expect(&format!("Failed to find `{}`.", std::str::from_utf8($symbol).unwrap())),
                         )
                     };
                 )*
