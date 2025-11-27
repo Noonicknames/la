@@ -2,13 +2,14 @@
 name = "la"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.85"
 
 [dependencies]
 cblas-sys = { version = "0.3" }
 lapacke-sys = { version = "0.2" }
 
 cfg-if = { version = "1.0" }
-libloading = { version = "0.9" }
+libloading = { version = "0.8" }
 thiserror = { version = "2" }
 glam = { version = "0.30" }
 nalgebra = { version = "0.32", default-features = false, features = ["macros", "std"]}
