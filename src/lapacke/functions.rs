@@ -5,9 +5,9 @@ use std::{
 };
 
 use libloading::Symbol;
-use nalgebra::{ArrayStorage, Dim, Matrix, StorageMut, Vector, U1};
+use nalgebra::{ArrayStorage, Complex, Dim, Matrix, StorageMut, Vector, U1};
 
-use crate::LaInt;
+use crate::{LaComplexDouble, LaComplexFloat, LaInt};
 
 use super::lapacke_lib::LapackeLib;
 
@@ -90,6 +90,11 @@ pub struct LapackeFunctions<'a> {
 
     sstemr: Symbol<'a, LapackeSstemrFn>,
     dstemr: Symbol<'a, LapackeDstemrFn>,
+
+    sgtsv: Symbol<'a, LapackeSgtsvFn>,
+    dgtsv: Symbol<'a, LapackeDgtsvFn>,
+    cgtsv: Symbol<'a, LapackeCgtsvFn>,
+    zgtsv: Symbol<'a, LapackeZgtsvFn>,
 }
 
 impl<'a> LapackeFunctions<'a> {
@@ -123,6 +128,11 @@ impl<'a> LapackeFunctions<'a> {
 
             [sstemr, b"LAPACKE_sstemr", LapackeSstemrFn],
             [dstemr, b"LAPACKE_dstemr", LapackeDstemrFn],
+
+            [sgtsv, b"LAPACKE_sgtsv", LapackeSgtsvFn],
+            [dgtsv, b"LAPACKE_dgtsv", LapackeDgtsvFn],
+            [cgtsv, b"LAPACKE_cgtsv", LapackeCgtsvFn],
+            [zgtsv, b"LAPACKE_zgtsv", LapackeZgtsvFn],
         }
     }
 }
@@ -385,6 +395,7 @@ impl<'a> LapackeFunctions<'a> {
         }
     }
 
+    /// Calculates eigenvalues and optionally eigenvectors for a symmetric tridiagonal matrix, returns number of eigenvalues found.
     ///
     /// # Footguns
     /// Ensure vector e is the same length as d.
@@ -469,6 +480,143 @@ impl<'a> LapackeFunctions<'a> {
         }
 
         m as usize
+    }
+
+    /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
+    ///
+    /// The solution will be stored in matrix b after calling.
+    pub fn sgtsv<DD, SD, DU, SU, DL, SL, RB, CB, SB>(
+        &self,
+        diagonal: &mut Vector<f32, DD, SD>,
+        upper_diagonal: &mut Vector<f32, DU, SU>,
+        lower_diagonal: &mut Vector<f32, DL, SL>,
+        b: &mut Matrix<f32, RB, CB, SB>,
+    ) where
+        DD: Dim,
+        SD: StorageMut<f32, DD>,
+        DU: Dim,
+        SU: StorageMut<f32, DU>,
+        DL: Dim,
+        SL: StorageMut<f32, DL>,
+        RB: Dim,
+        CB: Dim,
+        SB: StorageMut<f32, RB, CB>,
+    {
+        let n = diagonal.len() as LaInt;
+        let ldb = b.shape().0 as LaInt;
+        let nrhs = b.shape().1 as LaInt;
+        (self.sgtsv)(
+            cblas_sys::CblasColMajor,
+            n,
+            nrhs,
+            lower_diagonal.as_mut_ptr(),
+            diagonal.as_mut_ptr(),
+            upper_diagonal.as_mut_ptr(),
+            b.as_mut_ptr(),
+            ldb,
+        );
+    }
+    /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
+    ///
+    /// The solution will be stored in matrix b after calling.
+    pub fn dgtsv<DD, SD, DU, SU, DL, SL, RB, CB, SB>(
+        &self,
+        diagonal: &mut Vector<f64, DD, SD>,
+        upper_diagonal: &mut Vector<f64, DU, SU>,
+        lower_diagonal: &mut Vector<f64, DL, SL>,
+        b: &mut Matrix<f64, RB, CB, SB>,
+    ) where
+        DD: Dim,
+        SD: StorageMut<f64, DD>,
+        DU: Dim,
+        SU: StorageMut<f64, DU>,
+        DL: Dim,
+        SL: StorageMut<f64, DL>,
+        RB: Dim,
+        CB: Dim,
+        SB: StorageMut<f64, RB, CB>,
+    {
+        let n = diagonal.len() as LaInt;
+        let ldb = b.shape().0 as LaInt;
+        let nrhs = b.shape().1 as LaInt;
+        (self.dgtsv)(
+            cblas_sys::CblasColMajor,
+            n,
+            nrhs,
+            lower_diagonal.as_mut_ptr(),
+            diagonal.as_mut_ptr(),
+            upper_diagonal.as_mut_ptr(),
+            b.as_mut_ptr(),
+            ldb,
+        );
+    }
+    /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
+    ///
+    /// The solution will be stored in matrix b after calling.
+    pub fn cgtsv<DD, SD, DU, SU, DL, SL, RB, CB, SB>(
+        &self,
+        diagonal: &mut Vector<Complex<f32>, DD, SD>,
+        upper_diagonal: &mut Vector<Complex<f32>, DU, SU>,
+        lower_diagonal: &mut Vector<Complex<f32>, DL, SL>,
+        b: &mut Matrix<Complex<f32>, RB, CB, SB>,
+    ) where
+        DD: Dim,
+        SD: StorageMut<Complex<f32>, DD>,
+        DU: Dim,
+        SU: StorageMut<Complex<f32>, DU>,
+        DL: Dim,
+        SL: StorageMut<Complex<f32>, DL>,
+        RB: Dim,
+        CB: Dim,
+        SB: StorageMut<Complex<f32>, RB, CB>,
+    {
+        let n = diagonal.len() as LaInt;
+        let ldb = b.shape().0 as LaInt;
+        let nrhs = b.shape().1 as LaInt;
+        (self.cgtsv)(
+            cblas_sys::CblasColMajor,
+            n,
+            nrhs,
+            lower_diagonal.as_mut_ptr(),
+            diagonal.as_mut_ptr(),
+            upper_diagonal.as_mut_ptr(),
+            b.as_mut_ptr(),
+            ldb,
+        );
+    }
+    /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
+    ///
+    /// The solution will be stored in matrix b after calling.
+    pub fn zgtsv<DD, SD, DU, SU, DL, SL, RB, CB, SB>(
+        &self,
+        diagonal: &mut Vector<Complex<f64>, DD, SD>,
+        upper_diagonal: &mut Vector<Complex<f64>, DU, SU>,
+        lower_diagonal: &mut Vector<Complex<f64>, DL, SL>,
+        b: &mut Matrix<Complex<f64>, RB, CB, SB>,
+    ) where
+        DD: Dim,
+        SD: StorageMut<Complex<f64>, DD>,
+        DU: Dim,
+        SU: StorageMut<Complex<f64>, DU>,
+        DL: Dim,
+        SL: StorageMut<Complex<f64>, DL>,
+        RB: Dim,
+        CB: Dim,
+        SB: StorageMut<Complex<f64>, RB, CB>,
+    {
+        let n = diagonal.len() as LaInt;
+        let ldb = b.shape().0 as LaInt;
+        let nrhs = b.shape().1 as LaInt;
+        (self.zgtsv)(
+            cblas_sys::CblasColMajor,
+            n,
+            nrhs,
+            lower_diagonal.as_mut_ptr(),
+            diagonal.as_mut_ptr(),
+            upper_diagonal.as_mut_ptr(),
+            b.as_mut_ptr(),
+            ldb,
+        );
     }
 }
 
@@ -626,4 +774,45 @@ type LapackeDstemrFn = extern "C" fn(
     nzc: LaInt,
     isuppz: *mut LaInt,
     tryrac: *mut i32, // bool
+);
+
+type LapackeSgtsvFn = extern "C" fn(
+    matrix_layout: cblas_sys::CBLAS_LAYOUT,
+    n: LaInt,
+    nrhs: LaInt,
+    dl: *mut c_float,
+    d: *mut c_float,
+    du: *mut c_float,
+    b: *mut c_float,
+    ldb: LaInt,
+);
+type LapackeDgtsvFn = extern "C" fn(
+    matrix_layout: cblas_sys::CBLAS_LAYOUT,
+    n: LaInt,
+    nrhs: LaInt,
+    dl: *mut c_double,
+    d: *mut c_double,
+    du: *mut c_double,
+    b: *mut c_double,
+    ldb: LaInt,
+);
+type LapackeCgtsvFn = extern "C" fn(
+    matrix_layout: cblas_sys::CBLAS_LAYOUT,
+    n: LaInt,
+    nrhs: LaInt,
+    dl: *mut LaComplexFloat,
+    d: *mut LaComplexFloat,
+    du: *mut LaComplexFloat,
+    b: *mut LaComplexFloat,
+    ldb: LaInt,
+);
+type LapackeZgtsvFn = extern "C" fn(
+    matrix_layout: cblas_sys::CBLAS_LAYOUT,
+    n: LaInt,
+    nrhs: LaInt,
+    dl: *mut LaComplexDouble,
+    d: *mut LaComplexDouble,
+    du: *mut LaComplexDouble,
+    b: *mut LaComplexDouble,
+    ldb: LaInt,
 );
