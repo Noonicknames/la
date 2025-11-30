@@ -1,5 +1,6 @@
 use std::{
     ffi::c_float,
+    num::NonZeroI32,
     ops::{Bound, Deref, Range, RangeBounds},
     os::raw::c_double,
 };
@@ -152,7 +153,8 @@ impl<'a> LapackeFunctions<'a> {
         a: &mut Matrix<f64, RA, CA, SA>,
         b: &mut Matrix<f64, RB, CB, SB>,
         w: &mut Vector<f64, DW, SW>,
-    ) where
+    ) -> Result<(), NonZeroI32>
+    where
         RA: Dim,
         CA: Dim,
         SA: StorageMut<f64, RA, CA>,
@@ -170,7 +172,7 @@ impl<'a> LapackeFunctions<'a> {
         let lda = a.shape().0 as LaInt;
         let ldb = b.shape().0 as LaInt;
 
-        (self.dsygvd)(
+        if let Some(err) = NonZeroI32::new((self.dsygvd)(
             cblas_sys::CblasColMajor,
             problem_kind.to_sys(),
             output_kind.to_sys(),
@@ -181,7 +183,11 @@ impl<'a> LapackeFunctions<'a> {
             b.data.ptr_mut(),
             ldb,
             w.as_mut_ptr(),
-        )
+        )) {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
     pub fn ssygvd<RA, CA, SA, RB, CB, SB, DW, SW>(
         &self,
@@ -191,7 +197,8 @@ impl<'a> LapackeFunctions<'a> {
         a: &mut Matrix<f32, RA, CA, SA>,
         b: &mut Matrix<f32, RB, CB, SB>,
         w: &mut Vector<f32, DW, SW>,
-    ) where
+    ) -> Result<(), NonZeroI32>
+    where
         RA: Dim,
         CA: Dim,
         SA: StorageMut<f32, RA, CA>,
@@ -210,7 +217,7 @@ impl<'a> LapackeFunctions<'a> {
         let lda = a.data.strides().0.value() as LaInt;
         let ldb = b.data.strides().0.value() as LaInt;
 
-        (self.ssygvd)(
+        if let Some(err) = NonZeroI32::new((self.ssygvd)(
             cblas_sys::CblasColMajor,
             problem_kind.to_sys(),
             output_kind.to_sys(),
@@ -221,7 +228,11 @@ impl<'a> LapackeFunctions<'a> {
             b.data.ptr_mut(),
             ldb,
             w.as_mut_ptr(),
-        )
+        )) {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn ssbevd<RA, CA, SA, DW, SW, RZ, CZ, SZ>(
@@ -230,7 +241,8 @@ impl<'a> LapackeFunctions<'a> {
         ab: &mut Matrix<f32, RA, CA, SA>,
         w: &mut Vector<f32, DW, SW>,
         z: Option<&mut Matrix<f32, RZ, CZ, SZ>>,
-    ) where
+    ) -> Result<(), NonZeroI32>
+    where
         RA: Dim,
         CA: Dim,
         SA: StorageMut<f32, RA, CA>,
@@ -246,7 +258,7 @@ impl<'a> LapackeFunctions<'a> {
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;
-            (self.ssbevd)(
+            if let Some(err) = NonZeroI32::new((self.ssbevd)(
                 cblas_sys::CblasColMajor,
                 EigenOutputKind::Value.to_sys(),
                 uplo.to_sys(),
@@ -257,9 +269,13 @@ impl<'a> LapackeFunctions<'a> {
                 w.as_mut_ptr(),
                 z.as_mut_ptr(),
                 ldz,
-            )
+            )) {
+                Err(err)
+            } else {
+                Ok(())
+            }
         } else {
-            (self.ssbevd)(
+            if let Some(err) = NonZeroI32::new((self.ssbevd)(
                 cblas_sys::CblasColMajor,
                 EigenOutputKind::Value.to_sys(),
                 uplo.to_sys(),
@@ -270,7 +286,11 @@ impl<'a> LapackeFunctions<'a> {
                 w.as_mut_ptr(),
                 std::ptr::null_mut(),
                 0,
-            )
+            )) {
+                Err(err)
+            } else {
+                Ok(())
+            }
         }
     }
     pub fn dsbevd<RA, CA, SA, DW, SW, RZ, CZ, SZ>(
@@ -279,7 +299,8 @@ impl<'a> LapackeFunctions<'a> {
         ab: &mut Matrix<f64, RA, CA, SA>,
         w: &mut Vector<f64, DW, SW>,
         z: Option<&mut Matrix<f64, RZ, CZ, SZ>>,
-    ) where
+    ) -> Result<(), NonZeroI32>
+    where
         RA: Dim,
         CA: Dim,
         SA: StorageMut<f64, RA, CA>,
@@ -295,7 +316,7 @@ impl<'a> LapackeFunctions<'a> {
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;
-            (self.dsbevd)(
+            if let Some(err) = NonZeroI32::new((self.dsbevd)(
                 cblas_sys::CblasColMajor,
                 EigenOutputKind::Value.to_sys(),
                 uplo.to_sys(),
@@ -306,9 +327,13 @@ impl<'a> LapackeFunctions<'a> {
                 w.as_mut_ptr(),
                 z.as_mut_ptr(),
                 ldz,
-            )
+            )) {
+                Err(err)
+            } else {
+                Ok(())
+            }
         } else {
-            (self.dsbevd)(
+            if let Some(err) = NonZeroI32::new((self.dsbevd)(
                 cblas_sys::CblasColMajor,
                 EigenOutputKind::Value.to_sys(),
                 uplo.to_sys(),
@@ -319,19 +344,24 @@ impl<'a> LapackeFunctions<'a> {
                 w.as_mut_ptr(),
                 std::ptr::null_mut(),
                 0,
-            )
+            )) {
+                Err(err)
+            } else {
+                Ok(())
+            }
         }
     }
 
     pub fn sstemr<DD, SD, DE, SE, DW, SW, DS, SS, RZ, CZ, SZ>(
         &self,
         range: EigenRange<f32>,
-        d: &mut Vector<f32, DD, SD>,
-        e: &mut Vector<f32, DE, SE>,
-        w: &mut Vector<f32, DW, SW>,
+        diagonal: &mut Vector<f32, DD, SD>,
+        off_diagonal: &mut Vector<f32, DE, SE>,
+        eig_out: &mut Vector<f32, DW, SW>,
         isuppz: &mut Vector<LaInt, DS, SS>,
         z: Option<&mut Matrix<f32, RZ, CZ, SZ>>,
-    ) where
+    ) -> Result<usize, NonZeroI32>
+    where
         DD: Dim,
         SD: StorageMut<f32, DD>,
         DE: Dim,
@@ -344,55 +374,68 @@ impl<'a> LapackeFunctions<'a> {
         CZ: Dim,
         SZ: StorageMut<f32, RZ, CZ>,
     {
-        let n = d.shape().0 as LaInt;
+        assert!(off_diagonal.len() == off_diagonal.len());
+
+        let n = diagonal.shape().0 as LaInt;
         let (il, iu) = range.get_sys_index(n as usize).unwrap_or_default();
         let (vl, vu) = range.get_sys_value().unwrap_or_default();
         let range = range.to_sys_char();
 
         let mut m = 0 as LaInt;
+        let mut tryrac = 0 as i32;
+
+        let range_display = char::from_u32(range as u32).unwrap();
+
+        println!("n = {n}\nil = {il}, iu = {iu}\nvl = {vl}, vu = {vu}\nrange = {range_display}\nm = {m}\ntryrac = {tryrac}");
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;
-            (self.sstemr)(
+            if let Some(err) = NonZeroI32::new((self.sstemr)(
                 cblas_sys::CblasColMajor,
                 EigenOutputKind::ValueVector.to_sys(),
                 range,
                 n,
-                d.as_mut_ptr(),
-                e.as_mut_ptr(),
+                diagonal.as_mut_ptr(),
+                off_diagonal.as_mut_ptr(),
                 vl,
                 vu,
                 il,
                 iu,
                 &mut m,
-                w.as_mut_ptr(),
+                eig_out.as_mut_ptr(),
                 z.as_mut_ptr(),
                 ldz,
                 z.shape().1 as LaInt,
                 isuppz.as_mut_ptr(),
-                &mut false,
-            )
+                &mut tryrac,
+            ) as i32)
+            {
+                return Err(err);
+            }
         } else {
-            (self.sstemr)(
+            if let Some(err) = NonZeroI32::new((self.sstemr)(
                 cblas_sys::CblasColMajor,
                 EigenOutputKind::Value.to_sys(),
                 range,
                 n,
-                d.as_mut_ptr(),
-                e.as_mut_ptr(),
+                diagonal.as_mut_ptr(),
+                off_diagonal.as_mut_ptr(),
                 vl,
                 vu,
                 il,
                 iu,
                 &mut m,
-                w.as_mut_ptr(),
+                eig_out.as_mut_ptr(),
                 std::ptr::null_mut(),
                 0,
                 0,
                 isuppz.as_mut_ptr(),
-                &mut false,
-            )
+                &mut tryrac,
+            )) {
+                return Err(err);
+            }
         }
+        Ok(m as usize)
     }
 
     /// Calculates eigenvalues and optionally eigenvectors for a symmetric tridiagonal matrix, returns number of eigenvalues found.
@@ -408,7 +451,7 @@ impl<'a> LapackeFunctions<'a> {
         eig_out: &mut Vector<f64, DW, SW>,
         isuppz: &mut Vector<LaInt, DS, SS>,
         z: Option<&mut Matrix<f64, RZ, CZ, SZ>>,
-    ) -> usize
+    ) -> Result<usize, NonZeroI32>
     where
         DD: Dim,
         SD: StorageMut<f64, DD>,
@@ -438,7 +481,7 @@ impl<'a> LapackeFunctions<'a> {
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;
-            (self.dstemr)(
+            if let Some(err) = NonZeroI32::new((self.dstemr)(
                 cblas_sys::CblasColMajor,
                 EigenOutputKind::ValueVector.to_sys(),
                 range,
@@ -453,12 +496,15 @@ impl<'a> LapackeFunctions<'a> {
                 eig_out.as_mut_ptr(),
                 z.as_mut_ptr(),
                 ldz,
-                z.shape().1 as LaInt, // nzc, number of columns in z
+                z.shape().1 as LaInt,
                 isuppz.as_mut_ptr(),
                 &mut tryrac,
-            )
+            ) as i32)
+            {
+                return Err(err);
+            }
         } else {
-            (self.dstemr)(
+            if let Some(err) = NonZeroI32::new((self.dstemr)(
                 cblas_sys::CblasColMajor,
                 EigenOutputKind::Value.to_sys(),
                 range,
@@ -472,14 +518,15 @@ impl<'a> LapackeFunctions<'a> {
                 &mut m,
                 eig_out.as_mut_ptr(),
                 std::ptr::null_mut(),
-                1,
+                0,
                 0,
                 isuppz.as_mut_ptr(),
                 &mut tryrac,
-            )
+            )) {
+                return Err(err);
+            }
         }
-
-        m as usize
+        Ok(m as usize)
     }
 
     /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
@@ -491,7 +538,8 @@ impl<'a> LapackeFunctions<'a> {
         upper_diagonal: &mut Vector<f32, DU, SU>,
         lower_diagonal: &mut Vector<f32, DL, SL>,
         b: &mut Matrix<f32, RB, CB, SB>,
-    ) where
+    ) -> Result<(), NonZeroI32>
+    where
         DD: Dim,
         SD: StorageMut<f32, DD>,
         DU: Dim,
@@ -505,7 +553,7 @@ impl<'a> LapackeFunctions<'a> {
         let n = diagonal.len() as LaInt;
         let ldb = b.shape().0 as LaInt;
         let nrhs = b.shape().1 as LaInt;
-        (self.sgtsv)(
+        if let Some(err) = NonZeroI32::new((self.sgtsv)(
             cblas_sys::CblasColMajor,
             n,
             nrhs,
@@ -514,7 +562,11 @@ impl<'a> LapackeFunctions<'a> {
             upper_diagonal.as_mut_ptr(),
             b.as_mut_ptr(),
             ldb,
-        );
+        )) {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
     /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
     ///
@@ -698,7 +750,7 @@ type LapackeSsygvdFn = extern "C" fn(
     b: *mut c_float,                        // b
     ldb: LaInt,                             // ldb
     w: *mut c_float,                        // w
-);
+) -> LaInt;
 type LapackeDsygvdFn = extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT, // matrix_layout
     itype: LaInt,                           // itype
@@ -710,7 +762,7 @@ type LapackeDsygvdFn = extern "C" fn(
     b: *mut c_double,                       // b
     ldb: LaInt,                             // ldb
     w: *mut c_double,                       // w
-);
+) -> LaInt;
 
 type LapackeSsbevdFn = extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
@@ -723,7 +775,7 @@ type LapackeSsbevdFn = extern "C" fn(
     w: *mut c_float,
     z: *mut c_float,
     ldz: LaInt,
-);
+) -> LaInt;
 type LapackeDsbevdFn = extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     jobz: u8,
@@ -735,7 +787,7 @@ type LapackeDsbevdFn = extern "C" fn(
     w: *mut c_double,
     z: *mut c_double,
     ldz: LaInt,
-);
+) -> LaInt;
 
 type LapackeSstemrFn = extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
@@ -754,8 +806,8 @@ type LapackeSstemrFn = extern "C" fn(
     ldz: LaInt,
     nzc: LaInt,
     isuppz: *mut LaInt,
-    tryrac: *mut bool,
-);
+    tryrac: *mut i32,
+) -> LaInt;
 type LapackeDstemrFn = extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     jobz: u8,
@@ -774,7 +826,7 @@ type LapackeDstemrFn = extern "C" fn(
     nzc: LaInt,
     isuppz: *mut LaInt,
     tryrac: *mut i32, // bool
-);
+) -> LaInt;
 
 type LapackeSgtsvFn = extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
@@ -785,7 +837,7 @@ type LapackeSgtsvFn = extern "C" fn(
     du: *mut c_float,
     b: *mut c_float,
     ldb: LaInt,
-);
+) -> LaInt;
 type LapackeDgtsvFn = extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     n: LaInt,
@@ -795,7 +847,7 @@ type LapackeDgtsvFn = extern "C" fn(
     du: *mut c_double,
     b: *mut c_double,
     ldb: LaInt,
-);
+) -> LaInt;
 type LapackeCgtsvFn = extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     n: LaInt,
@@ -805,7 +857,7 @@ type LapackeCgtsvFn = extern "C" fn(
     du: *mut LaComplexFloat,
     b: *mut LaComplexFloat,
     ldb: LaInt,
-);
+) -> LaInt;
 type LapackeZgtsvFn = extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     n: LaInt,
@@ -815,4 +867,4 @@ type LapackeZgtsvFn = extern "C" fn(
     du: *mut LaComplexDouble,
     b: *mut LaComplexDouble,
     ldb: LaInt,
-);
+) -> LaInt;
