@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use crate::error::LaError;
 
 #[cfg(target_os = "windows")]
-pub const LIB_SUFFIXES: &[&str] = &[".dll"];
+pub const LIB_SUFFIXES: &[&str] = &["dll"];
 #[cfg(target_os = "linux")]
-pub const LIB_SUFFIXES: &[&str] = &[".so"];
+pub const LIB_SUFFIXES: &[&str] = &["so"];
 #[cfg(target_os = "macos")]
-pub const LIB_SUFFIXES: &[&str] = &[".dylib"];
+pub const LIB_SUFFIXES: &[&str] = &["dylib"];
 
 #[cfg(target_os = "windows")]
 pub const SEARCH_PATHS: &[&str] = &[];
@@ -67,7 +67,13 @@ pub fn find_lib_path_with_dir(
             }
             if LIB_SUFFIXES
                 .iter()
-                .find(|suffix| file_name.ends_with(*suffix))
+                .find(|suffix| {
+                    file_name
+                        .split('.')
+                        .skip(1)
+                        .find(|ext| ext == *suffix)
+                        .is_some()
+                })
                 .is_none()
             {
                 continue;
