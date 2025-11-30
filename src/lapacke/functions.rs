@@ -577,7 +577,8 @@ impl<'a> LapackeFunctions<'a> {
         upper_diagonal: &mut Vector<f64, DU, SU>,
         lower_diagonal: &mut Vector<f64, DL, SL>,
         b: &mut Matrix<f64, RB, CB, SB>,
-    ) where
+    ) -> Result<(), NonZeroI32>
+    where
         DD: Dim,
         SD: StorageMut<f64, DD>,
         DU: Dim,
@@ -591,7 +592,7 @@ impl<'a> LapackeFunctions<'a> {
         let n = diagonal.len() as LaInt;
         let ldb = b.shape().0 as LaInt;
         let nrhs = b.shape().1 as LaInt;
-        (self.dgtsv)(
+        if let Some(err) = NonZeroI32::new((self.dgtsv)(
             cblas_sys::CblasColMajor,
             n,
             nrhs,
@@ -600,7 +601,11 @@ impl<'a> LapackeFunctions<'a> {
             upper_diagonal.as_mut_ptr(),
             b.as_mut_ptr(),
             ldb,
-        );
+        )) {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
     /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
     ///
@@ -611,7 +616,8 @@ impl<'a> LapackeFunctions<'a> {
         upper_diagonal: &mut Vector<Complex<f32>, DU, SU>,
         lower_diagonal: &mut Vector<Complex<f32>, DL, SL>,
         b: &mut Matrix<Complex<f32>, RB, CB, SB>,
-    ) where
+    ) -> Result<(), NonZeroI32>
+    where
         DD: Dim,
         SD: StorageMut<Complex<f32>, DD>,
         DU: Dim,
@@ -625,7 +631,7 @@ impl<'a> LapackeFunctions<'a> {
         let n = diagonal.len() as LaInt;
         let ldb = b.shape().0 as LaInt;
         let nrhs = b.shape().1 as LaInt;
-        (self.cgtsv)(
+        if let Some(err) = NonZeroI32::new((self.cgtsv)(
             cblas_sys::CblasColMajor,
             n,
             nrhs,
@@ -634,7 +640,11 @@ impl<'a> LapackeFunctions<'a> {
             upper_diagonal.as_mut_ptr(),
             b.as_mut_ptr(),
             ldb,
-        );
+        )) {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
     /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
     ///
@@ -645,7 +655,8 @@ impl<'a> LapackeFunctions<'a> {
         upper_diagonal: &mut Vector<Complex<f64>, DU, SU>,
         lower_diagonal: &mut Vector<Complex<f64>, DL, SL>,
         b: &mut Matrix<Complex<f64>, RB, CB, SB>,
-    ) where
+    ) -> Result<(), NonZeroI32>
+    where
         DD: Dim,
         SD: StorageMut<Complex<f64>, DD>,
         DU: Dim,
@@ -659,7 +670,7 @@ impl<'a> LapackeFunctions<'a> {
         let n = diagonal.len() as LaInt;
         let ldb = b.shape().0 as LaInt;
         let nrhs = b.shape().1 as LaInt;
-        (self.zgtsv)(
+        if let Some(err) = NonZeroI32::new((self.zgtsv)(
             cblas_sys::CblasColMajor,
             n,
             nrhs,
@@ -668,7 +679,11 @@ impl<'a> LapackeFunctions<'a> {
             upper_diagonal.as_mut_ptr(),
             b.as_mut_ptr(),
             ldb,
-        );
+        )) {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 }
 
