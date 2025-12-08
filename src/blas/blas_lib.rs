@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc};
 
+#[cfg(feature = "dynamic")]
 use libloading::{Library, Symbol};
 
 use crate::error::LaError;
@@ -13,13 +14,15 @@ use super::{
 pub enum BlasBackend {
     IntelMkl,
     OpenBlas,
+    Static,
 }
 
 impl BlasBackend {
-    pub fn lib_name(&self) -> &str {
+    pub fn lib_name(&self) -> Option<&str> {
         match self {
-            Self::IntelMkl => "mkl_rt",
-            Self::OpenBlas => "openblas",
+            Self::IntelMkl => Some("mkl_rt"),
+            Self::OpenBlas => Some("openblas"),
+            Self::Static => None,
         }
     }
 }
@@ -47,7 +50,8 @@ pub struct BlasLib(Arc<BlasLibInner>);
 
 #[derive(Debug)]
 pub struct BlasLibInner {
-    pub lib: Library,
+    #[cfg(feature = "dynamic")]
+    lib: Option<Library>,
     pub backend: BlasBackend,
 }
 
@@ -56,8 +60,10 @@ impl Drop for BlasLibInner {
         if let BlasBackend::OpenBlas = self.backend {}
 
         if let BlasBackend::IntelMkl = self.backend {
+            // If the backend is Intel the library must be loaded in.
+            let lib = self.lib.as_ref().unwrap();
             let free_buffers =
-                match unsafe { self.lib.get::<unsafe extern "C" fn()>(b"MKL_Free_Buffers") } {
+                match unsafe { lib.get::<unsafe extern "C" fn()>(b"MKL_Free_Buffers") } {
                     Ok(free_buffers) => free_buffers,
                     Err(why) => {
                         eprintln!("{why}");
@@ -65,16 +71,14 @@ impl Drop for BlasLibInner {
                     }
                 };
 
-            let free_thread_buffers = match unsafe {
-                self.lib
-                    .get::<unsafe extern "C" fn()>(b"MKL_Thread_Free_Buffers")
-            } {
-                Ok(free_buffers) => free_buffers,
-                Err(why) => {
-                    eprintln!("{why}");
-                    return;
-                }
-            };
+            let free_thread_buffers =
+                match unsafe { lib.get::<unsafe extern "C" fn()>(b"MKL_Thread_Free_Buffers") } {
+                    Ok(free_buffers) => free_buffers,
+                    Err(why) => {
+                        eprintln!("{why}");
+                        return;
+                    }
+                };
 
             unsafe {
                 free_thread_buffers();
@@ -116,8 +120,9 @@ impl BlasLib {
         Err(LaError::from_iter(errors))
     }
 
-    pub fn lib(&self) -> &Library {
-        &self.0.lib
+    #[cfg(feature = "dynamic")]
+    pub fn lib(&self) -> Option<&Library> {
+        self.0.lib.as_ref()
     }
 
     pub fn with_additional_search_paths<P>(
@@ -146,11 +151,12 @@ impl BlasLib {
             BlasBackend::IntelMkl => {
                 type MklSetThreadingLayerFn = extern "C" fn(i32);
                 let mkl_set_threading_layer: Symbol<MklSetThreadingLayerFn> =
-                    unsafe { self.0.lib.get(b"MKL_Set_Threading_Layer") }
+                    unsafe { self.0.lib.as_ref().unwrap().get(b"MKL_Set_Threading_Layer") }
                         .expect("Cannot find MKL_Set_Threading_layer");
                 mkl_set_threading_layer(threading.intel())
             }
             BlasBackend::OpenBlas => {}
+            BlasBackend::Static => {}
         }
     }
 
@@ -159,24 +165,33 @@ impl BlasLib {
             BlasBackend::IntelMkl => {
                 type MklSetNumThreadsFn = extern "C" fn(i32);
                 let mkl_set_num_threads: Symbol<MklSetNumThreadsFn> =
-                    unsafe { self.0.lib.get(b"MKL_Set_Num_Threads") }
+                    unsafe { self.lib().unwrap().get(b"MKL_Set_Num_Threads") }
                         .expect("Cannot find MKL_Set_Num_Threads");
                 mkl_set_num_threads(threads as i32)
             }
             BlasBackend::OpenBlas => {
                 type OpenBlasSetNumThreadsFn = extern "C" fn(i32);
                 let mkl_set_num_threads: Symbol<OpenBlasSetNumThreadsFn> =
-                    unsafe { self.0.lib.get(b"openblas_set_num_threads") }
+                    unsafe { self.lib().unwrap().get(b"openblas_set_num_threads") }
                         .expect("Cannot find openblas_set_num_threads");
                 mkl_set_num_threads(threads as i32)
             }
+            BlasBackend::Static => {}
         }
     }
 
     pub fn with_backend(backend: BlasBackend) -> Result<Self, LaError> {
-        let lib_path = find_lib_path(backend.lib_name())?;
-        let lib = unsafe { Library::new(lib_path) }?;
-        Ok(Self(Arc::new(BlasLibInner { lib, backend })))
+        match backend {
+            BlasBackend::IntelMkl | BlasBackend::OpenBlas => {
+                let lib_path = find_lib_path(backend.lib_name().unwrap())?;
+                let lib = unsafe { Library::new(lib_path) }?;
+                Ok(Self(Arc::new(BlasLibInner {
+                    lib: Some(lib),
+                    backend,
+                })))
+            }
+            BlasBackend::Static => Ok(Self(Arc::new(BlasLibInner { lib: None, backend }))),
+        }
     }
 
     pub fn with_backend_with_additional_search_paths<P>(
@@ -186,13 +201,20 @@ impl BlasLib {
     where
         P: AsRef<Path>,
     {
-        // std::env::set_var("MKL_THREADING_LAYER", "SEQUENTIAL");
-        let lib_path = find_lib_path_with_additional_search_paths(
-            backend.lib_name(),
-            additional_search_paths,
-        )?;
-        let lib = unsafe { Library::new(lib_path) }?;
-        Ok(Self(Arc::new(BlasLibInner { lib, backend })))
+        match backend {
+            BlasBackend::IntelMkl | BlasBackend::OpenBlas => {
+                let lib_path = find_lib_path_with_additional_search_paths(
+                    backend.lib_name().unwrap(),
+                    additional_search_paths,
+                )?;
+                let lib = unsafe { Library::new(lib_path) }?;
+                Ok(Self(Arc::new(BlasLibInner {
+                    lib: Some(lib),
+                    backend,
+                })))
+            }
+            BlasBackend::Static => Ok(Self(Arc::new(BlasLibInner { lib: None, backend }))),
+        }
     }
 
     pub fn backend(&self) -> BlasBackend {
@@ -260,8 +282,15 @@ mod tests {
         let complex_b = b.map(|x| Complex::new(x, x));
 
         let mut c = DMatrix::zeros(DIM, DIM);
-        blas.cgemm(Complex::ONE, Complex::ONE, &complex_a, Transpose::None, &complex_b, Transpose::None, &mut c);
-
+        blas.cgemm(
+            Complex::ONE,
+            Complex::ONE,
+            &complex_a,
+            Transpose::None,
+            &complex_b,
+            Transpose::None,
+            &mut c,
+        );
 
         let complex_a_view = VectorView::from_slice_with_strides_generic(
             complex_a.as_slice(),
@@ -278,7 +307,6 @@ mod tests {
             nalgebra::Dyn(a.len()),
         );
         blas.cdotc::<_, _, _, _, _, _>(complex_a_view, complex_b_view);
-
     }
 
     #[test]

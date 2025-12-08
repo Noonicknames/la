@@ -82,29 +82,31 @@ impl EigenRange<f64> {
 }
 
 #[derive(Clone)]
-pub struct LapackeFunctions<'a> {
-    ssygvd: Symbol<'a, LapackeSsygvdFn>,
-    dsygvd: Symbol<'a, LapackeDsygvdFn>,
+pub enum LapackeFunctions<'a> {
+    Dynamic {
+        ssygvd: Symbol<'a, LapackeSsygvdFn>,
+        dsygvd: Symbol<'a, LapackeDsygvdFn>,
 
-    ssbevd: Symbol<'a, LapackeSsbevdFn>,
-    dsbevd: Symbol<'a, LapackeDsbevdFn>,
+        ssbevd: Symbol<'a, LapackeSsbevdFn>,
+        dsbevd: Symbol<'a, LapackeDsbevdFn>,
 
-    sstemr: Symbol<'a, LapackeSstemrFn>,
-    dstemr: Symbol<'a, LapackeDstemrFn>,
+        sstemr: Symbol<'a, LapackeSstemrFn>,
+        dstemr: Symbol<'a, LapackeDstemrFn>,
 
-    sgtsv: Symbol<'a, LapackeSgtsvFn>,
-    dgtsv: Symbol<'a, LapackeDgtsvFn>,
-    cgtsv: Symbol<'a, LapackeCgtsvFn>,
-    zgtsv: Symbol<'a, LapackeZgtsvFn>,
+        sgtsv: Symbol<'a, LapackeSgtsvFn>,
+        dgtsv: Symbol<'a, LapackeDgtsvFn>,
+        cgtsv: Symbol<'a, LapackeCgtsvFn>,
+        zgtsv: Symbol<'a, LapackeZgtsvFn>,
+    },
+    Static,
 }
 
 impl<'a> LapackeFunctions<'a> {
     pub(crate) fn from_lib(lib: &LapackeLib) -> Self {
-        let lib = lib.lib();
-
-        macro_rules! functions {
+        macro_rules! functions_dynamic {
             ( $( [$name: ident, $symbol: expr, $fn_signature: ty] ),* $(,)?) => {
                 $(
+                    let lib = lib.lib().unwrap();
                     let $name = unsafe {
                         std::mem::transmute(
                             lib
@@ -114,13 +116,13 @@ impl<'a> LapackeFunctions<'a> {
                     };
                 )*
 
-                Self {
+                Self::Dynamic {
                     $($name),*
                 }
             };
         }
 
-        functions! {
+        functions_dynamic! {
             [ssygvd, b"LAPACKE_ssygvd", LapackeSsygvdFn],
             [dsygvd, b"LAPACKE_dsygvd", LapackeDsygvdFn],
 

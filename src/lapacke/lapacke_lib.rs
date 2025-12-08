@@ -13,7 +13,7 @@ impl LapackeLib {
     pub fn new(blas: &BlasLib) -> Result<Self, LaError> {
         Ok(Self(Arc::new(LapackeLibInner::new(blas)?)))
     }
-    pub(super) fn lib(&self) -> &Library {
+    pub(crate) fn lib(&self) -> Option<&Library> {
         self.0.lib()
     }
 
@@ -39,6 +39,7 @@ pub(super) enum LapackeLibInner {
         _blas_lib: BlasLib,
         lapack_lib: Arc<Library>,
     },
+    Static,
 }
 
 impl LapackeLibInner {
@@ -54,12 +55,14 @@ impl LapackeLibInner {
                     Arc::new(unsafe { Library::new(lib_path) }?)
                 },
             },
+            BlasBackend::Static => Self::Static,
         })
     }
-    fn lib(&self) -> &Library {
+    fn lib(&self) -> Option<&Library> {
         match self {
             Self::IntelMkl { blas_lapack_lib } => blas_lapack_lib.lib(),
-            Self::OpenBlas { lapack_lib, .. } => &lapack_lib,
+            Self::OpenBlas { lapack_lib, .. } => Some(&lapack_lib),
+            Self::Static => None
         }
     }
 }

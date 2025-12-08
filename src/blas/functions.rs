@@ -3,72 +3,90 @@ use std::{
     ops::Deref,
 };
 
+#[cfg(feature = "dynamic")]
 use libloading::Symbol;
 use nalgebra::{
     constraint::{SameDimension, ShapeConstraint},
     Complex, Dim, Matrix, Storage, StorageMut, VectorView,
 };
 
-use crate::{LaComplexDouble, LaComplexFloat, LaInt};
+use crate::{BlasBackend, LaComplexDouble, LaComplexFloat, LaInt};
 
 use super::blas_lib::{BlasLib, Transpose};
 
 #[derive(Clone)]
-pub struct BlasFunctions<'a> {
-    sdsdot: Symbol<'a, CBlasSDSDotFn>,
-    dsdot: Symbol<'a, CBlasDSDotFn>,
-    sdot: Symbol<'a, CBlasSDotFn>,
-    ddot: Symbol<'a, CBlasDDotFn>,
-    cdotu_sub: Symbol<'a, CBlasCDotUSubFn>,
-    cdotc_sub: Symbol<'a, CBlasCDotCSubFn>,
-    zdotu_sub: Symbol<'a, CBlasZDotUSubFn>,
-    zdotc_sub: Symbol<'a, CBlasZDotCSubFn>,
+pub enum BlasFunctions<'a> {
+    #[cfg(feature = "dynamic")]
+    Dynamic {
+        sdsdot: Symbol<'a, CBlasSDSDotFn>,
+        dsdot: Symbol<'a, CBlasDSDotFn>,
+        sdot: Symbol<'a, CBlasSDotFn>,
+        ddot: Symbol<'a, CBlasDDotFn>,
+        cdotu_sub: Symbol<'a, CBlasCDotUSubFn>,
+        cdotc_sub: Symbol<'a, CBlasCDotCSubFn>,
+        zdotu_sub: Symbol<'a, CBlasZDotUSubFn>,
+        zdotc_sub: Symbol<'a, CBlasZDotCSubFn>,
 
-    dgemm: Symbol<'a, CBlasDGemmFn>,
-    sgemm: Symbol<'a, CBlasSGemmFn>,
-    cgemm: Symbol<'a, CBlasCGemmFn>,
-    zgemm: Symbol<'a, CBlasZGemmFn>,
+        dgemm: Symbol<'a, CBlasDGemmFn>,
+        sgemm: Symbol<'a, CBlasSGemmFn>,
+        cgemm: Symbol<'a, CBlasCGemmFn>,
+        zgemm: Symbol<'a, CBlasZGemmFn>,
+    },
+    #[cfg(feature = "static")]
+    Static,
 }
 
 impl<'a> BlasFunctions<'a> {
     pub(crate) fn from_lib(lib: &BlasLib) -> Self {
-        macro_rules! functions {
+        macro_rules! functions_dynamic {
             ( $( [$name: ident, $symbol: expr, $fn_signature: ty] ),* $(,)?) => {
+                let lib = lib.lib().unwrap();
                 $(
                     let $name = unsafe {
                         std::mem::transmute(
-                            lib.lib()
+                            lib
                                 .get::<Symbol<$fn_signature>>($symbol)
                                 .expect(&format!("Failed to find `{}`.", std::str::from_utf8($symbol).unwrap())),
                         )
                     };
                 )*
 
-                Self {
+                Self::Dynamic {
                     $($name),*
                 }
             };
         }
 
-        functions! {
-            [sdsdot, b"cblas_sdsdot", CBlasSDSDotFn],
-            [dsdot, b"cblas_dsdot", CBlasDSDotFn],
-            [sdot, b"cblas_sdot", CBlasSDotFn],
-            [ddot, b"cblas_ddot", CBlasDDotFn],
-            [cdotu_sub, b"cblas_cdotu_sub", CBlasCDotUSubFn],
-            [cdotc_sub, b"cblas_cdotc_sub", CBlasCDotCSubFn],
-            [zdotu_sub, b"cblas_zdotu_sub", CBlasZDotUSubFn],
-            [zdotc_sub, b"cblas_zdotc_sub", CBlasZDotCSubFn],
+        match lib.backend() {
+            BlasBackend::IntelMkl | BlasBackend::OpenBlas => {
+                functions_dynamic! {
+                    [sdsdot, b"cblas_sdsdot", CBlasSDSDotFn],
+                    [dsdot, b"cblas_dsdot", CBlasDSDotFn],
+                    [sdot, b"cblas_sdot", CBlasSDotFn],
+                    [ddot, b"cblas_ddot", CBlasDDotFn],
+                    [cdotu_sub, b"cblas_cdotu_sub", CBlasCDotUSubFn],
+                    [cdotc_sub, b"cblas_cdotc_sub", CBlasCDotCSubFn],
+                    [zdotu_sub, b"cblas_zdotu_sub", CBlasZDotUSubFn],
+                    [zdotc_sub, b"cblas_zdotc_sub", CBlasZDotCSubFn],
 
-            [dgemm, b"cblas_dgemm", CBlasDGemmFn],
-            [sgemm, b"cblas_sgemm", CBlasSGemmFn],
-            [cgemm, b"cblas_cgemm", CBlasCGemmFn],
-            [zgemm, b"cblas_zgemm", CBlasZGemmFn],
+                    [dgemm, b"cblas_dgemm", CBlasDGemmFn],
+                    [sgemm, b"cblas_sgemm", CBlasSGemmFn],
+                    [cgemm, b"cblas_cgemm", CBlasCGemmFn],
+                    [zgemm, b"cblas_zgemm", CBlasZGemmFn],
+                }
+            }
+            BlasBackend::Static => Self::Static,
         }
     }
 }
 
 impl<'a> BlasFunctions<'a> {
+    pub fn raw_sdsdot(&self) -> CBlasSDSDotFn {
+        match self {
+            Self::Dynamic { sdsdot, .. } => **sdsdot,
+            Self::Static => cblas_sdsdot,
+        }
+    }
     /// Performs `dot(x,y) + alpha`.
     ///
     /// # Why does this exist?
@@ -93,10 +111,15 @@ impl<'a> BlasFunctions<'a> {
         let n = x.len() as LaInt;
         let incx = x.strides().0 as LaInt;
         let incy = y.strides().0 as LaInt;
-
-        (self.sdsdot)(n, alpha, x.as_ptr(), incx, y.as_ptr(), incy)
+        unsafe { (self.raw_sdsdot())(n, alpha, x.as_ptr(), incx, y.as_ptr(), incy) }
     }
 
+    pub fn raw_dsdot(&self) -> CBlasDSDotFn {
+        match self {
+            Self::Dynamic { dsdot, .. } => **dsdot,
+            Self::Static => cblas_dsdot,
+        }
+    }
     /// Performs `dot(x,y)`.
     ///
     /// The dot product is accumulated as a `f64` and returned as a `f64`.
@@ -119,9 +142,15 @@ impl<'a> BlasFunctions<'a> {
         let incx = x.strides().0 as LaInt;
         let incy = y.strides().0 as LaInt;
 
-        (self.dsdot)(n, x.as_ptr(), incx, y.as_ptr(), incy)
+        unsafe { (self.raw_dsdot())(n, x.as_ptr(), incx, y.as_ptr(), incy) }
     }
 
+    pub fn raw_sdot(&self) -> CBlasSDotFn {
+        match self {
+            Self::Dynamic { sdot, .. } => **sdot,
+            Self::Static => cblas_sdot,
+        }
+    }
     /// Performs `dot(x,y)`.
     ///
     /// For a [f64] variant, see [`BlasFunctions::ddot`].
@@ -143,10 +172,15 @@ impl<'a> BlasFunctions<'a> {
         let n = x.len() as LaInt;
         let incx = x.strides().0 as LaInt;
         let incy = y.strides().0 as LaInt;
-
-        (self.sdot)(n, x.as_ptr(), incx, y.as_ptr(), incy)
+        unsafe { (self.raw_sdot())(n, x.as_ptr(), incx, y.as_ptr(), incy) }
     }
 
+    pub fn raw_cdotu_sub(&self) -> CBlasCDotUSubFn {
+        match self {
+            Self::Dynamic { cdotu_sub, .. } => **cdotu_sub,
+            Self::Static => cblas_cdotu_sub,
+        }
+    }
     /// Performs `dot(x,y)`.
     ///
     /// For a [f64] variant, see [`BlasFunctions::ddot`].
@@ -171,11 +205,17 @@ impl<'a> BlasFunctions<'a> {
 
         let mut out = Complex::ZERO;
 
-        (self.cdotu_sub)(n, x.as_ptr(), incx, y.as_ptr(), incy, &mut out);
+        unsafe { (self.raw_cdotu_sub())(n, x.as_ptr(), incx, y.as_ptr(), incy, &mut out) };
 
         out
     }
 
+    pub fn raw_cdotc_sub(&self) -> CBlasCDotCSubFn {
+        match self {
+            Self::Dynamic { cdotc_sub, .. } => **cdotc_sub,
+            Self::Static => cblas_cdotc_sub,
+        }
+    }
     /// Performs `dot(conj(x),y)`.
     ///
     /// For a [f64] variant, see [`BlasFunctions::ddot`].
@@ -200,11 +240,17 @@ impl<'a> BlasFunctions<'a> {
 
         let mut out = Complex::ZERO;
 
-        (self.cdotc_sub)(n, x.as_ptr(), incx, y.as_ptr(), incy, &mut out);
+        unsafe { (self.raw_cdotc_sub())(n, x.as_ptr(), incx, y.as_ptr(), incy, &mut out) };
 
         out
     }
 
+    pub fn raw_zdotu_sub(&self) -> CBlasZDotUSubFn {
+        match self {
+            Self::Dynamic { zdotu_sub, .. } => **zdotu_sub,
+            Self::Static => cblas_zdotu_sub,
+        }
+    }
     /// Performs `dot(conj(x),y)`.
     ///
     /// For a [f64] variant, see [`BlasFunctions::ddot`].
@@ -229,11 +275,17 @@ impl<'a> BlasFunctions<'a> {
 
         let mut out = Complex::ZERO;
 
-        (self.zdotu_sub)(n, x.as_ptr(), incx, y.as_ptr(), incy, &mut out);
+        unsafe { (self.raw_zdotu_sub())(n, x.as_ptr(), incx, y.as_ptr(), incy, &mut out) };
 
         out
     }
 
+    pub fn raw_zdotc_sub(&self) -> CBlasZDotCSubFn {
+        match self {
+            Self::Dynamic { zdotc_sub, .. } => **zdotc_sub,
+            Self::Static => cblas_zdotc_sub,
+        }
+    }
     /// Performs `dot(conj(x),y)`.
     ///
     /// For a [f64] variant, see [`BlasFunctions::ddot`].
@@ -258,11 +310,17 @@ impl<'a> BlasFunctions<'a> {
 
         let mut out = Complex::ZERO;
 
-        (self.zdotc_sub)(n, x.as_ptr(), incx, y.as_ptr(), incy, &mut out);
+        unsafe { (self.raw_zdotc_sub())(n, x.as_ptr(), incx, y.as_ptr(), incy, &mut out) };
 
         out
     }
 
+    pub fn raw_ddot(&self) -> CBlasDDotFn {
+        match self {
+            Self::Dynamic { ddot, .. } => **ddot,
+            Self::Static => cblas_ddot,
+        }
+    }
     /// Performs `dot(x,y)`.
     ///
     /// For a [f32] variant, see [`BlasFunctions::sdot`].
@@ -277,9 +335,15 @@ impl<'a> BlasFunctions<'a> {
         let incx = x.strides().0 as LaInt;
         let incy = y.strides().0 as LaInt;
 
-        (self.ddot)(n, x.as_ptr(), incx, y.as_ptr(), incy)
+        unsafe { (self.raw_ddot())(n, x.as_ptr(), incx, y.as_ptr(), incy) }
     }
 
+    pub fn raw_sgemm(&self) -> CBlasSGemmFn {
+        match self {
+            Self::Dynamic { sgemm, .. } => **sgemm,
+            Self::Static => cblas_sgemm,
+        }
+    }
     /// Performs c := alpha * trans_a(a) * trans_b(b) + beta*c
     ///
     /// `trans` refers to taking the matrix transpose, adjoint, or no operation, see [Transpose].
@@ -313,22 +377,30 @@ impl<'a> BlasFunctions<'a> {
         let ldb = b.data.shape().0.value() as LaInt;
         let ldc = c.data.shape().0.value() as LaInt;
 
-        (self.sgemm)(
-            cblas_sys::CblasRowMajor,
-            trans_a.to_sys(),
-            trans_b.to_sys(),
-            m,
-            n,
-            k,
-            alpha,
-            a.data.ptr(),
-            lda,
-            b.data.ptr(),
-            ldb,
-            beta,
-            c.data.ptr_mut(),
-            ldc,
-        )
+        unsafe {
+            (self.raw_sgemm())(
+                cblas_sys::CblasRowMajor,
+                trans_a.to_sys(),
+                trans_b.to_sys(),
+                m,
+                n,
+                k,
+                alpha,
+                a.data.ptr(),
+                lda,
+                b.data.ptr(),
+                ldb,
+                beta,
+                c.data.ptr_mut(),
+                ldc,
+            )
+        }
+    }
+    pub fn raw_dgemm(&self) -> CBlasDGemmFn {
+        match self {
+            Self::Dynamic { dgemm, .. } => **dgemm,
+            Self::Static => cblas_dgemm,
+        }
     }
     /// Performs c := alpha * op_a(a) * op_b(b) + beta*c
     ///
@@ -363,24 +435,31 @@ impl<'a> BlasFunctions<'a> {
         let ldb = b.data.shape().0.value() as LaInt;
         let ldc = c.data.shape().0.value() as LaInt;
 
-        (self.dgemm)(
-            cblas_sys::CblasRowMajor,
-            trans_a.to_sys(),
-            trans_b.to_sys(),
-            m,
-            n,
-            k,
-            alpha,
-            a.data.ptr(),
-            lda,
-            b.data.ptr(),
-            ldb,
-            beta,
-            c.data.ptr_mut(),
-            ldc,
-        )
+        unsafe {
+            (self.raw_dgemm())(
+                cblas_sys::CblasRowMajor,
+                trans_a.to_sys(),
+                trans_b.to_sys(),
+                m,
+                n,
+                k,
+                alpha,
+                a.data.ptr(),
+                lda,
+                b.data.ptr(),
+                ldb,
+                beta,
+                c.data.ptr_mut(),
+                ldc,
+            )
+        }
     }
-
+    pub fn raw_cgemm(&self) -> CBlasCGemmFn {
+        match self {
+            Self::Dynamic { cgemm, .. } => **cgemm,
+            Self::Static => cblas_cgemm,
+        }
+    }
     /// Performs c := alpha * trans_a(a) * trans_b(b) + beta*c
     ///
     /// `trans` refers to taking the matrix transpose, adjoint, or no operation, see [Transpose].
@@ -414,24 +493,32 @@ impl<'a> BlasFunctions<'a> {
         let ldb = b.data.shape().0.value() as LaInt;
         let ldc = c.data.shape().0.value() as LaInt;
 
-        (self.cgemm)(
-            cblas_sys::CblasRowMajor,
-            trans_a.to_sys(),
-            trans_b.to_sys(),
-            m,
-            n,
-            k,
-            &alpha,
-            a.data.ptr(),
-            lda,
-            b.data.ptr(),
-            ldb,
-            &beta,
-            c.data.ptr_mut(),
-            ldc,
-        )
+        unsafe {
+            (self.raw_cgemm())(
+                cblas_sys::CblasRowMajor,
+                trans_a.to_sys(),
+                trans_b.to_sys(),
+                m,
+                n,
+                k,
+                &alpha,
+                a.data.ptr(),
+                lda,
+                b.data.ptr(),
+                ldb,
+                &beta,
+                c.data.ptr_mut(),
+                ldc,
+            )
+        }
     }
 
+    pub fn raw_zgemm(&self) -> CBlasZGemmFn {
+        match self {
+            Self::Dynamic { zgemm, .. } => **zgemm,
+            Self::Static => cblas_zgemm,
+        }
+    }
     /// Performs c := alpha * trans_a(a) * trans_b(b) + beta*c
     ///
     /// `trans` refers to taking the matrix transpose, adjoint, or no operation, see [Transpose].
@@ -465,22 +552,24 @@ impl<'a> BlasFunctions<'a> {
         let ldb = b.data.shape().0.value() as LaInt;
         let ldc = c.data.shape().0.value() as LaInt;
 
-        (self.zgemm)(
-            cblas_sys::CblasRowMajor,
-            trans_a.to_sys(),
-            trans_b.to_sys(),
-            m,
-            n,
-            k,
-            &alpha,
-            a.data.ptr(),
-            lda,
-            b.data.ptr(),
-            ldb,
-            &beta,
-            c.data.ptr_mut(),
-            ldc,
-        )
+        unsafe {
+            (self.raw_zgemm())(
+                cblas_sys::CblasRowMajor,
+                trans_a.to_sys(),
+                trans_b.to_sys(),
+                m,
+                n,
+                k,
+                &alpha,
+                a.data.ptr(),
+                lda,
+                b.data.ptr(),
+                ldb,
+                &beta,
+                c.data.ptr_mut(),
+                ldc,
+            )
+        }
     }
 }
 
@@ -497,7 +586,139 @@ impl Deref for BlasFunctionsStatic {
     }
 }
 
-type CBlasSDSDotFn = extern "C" fn(
+extern "C" {
+    fn cblas_sdsdot(
+        n: LaInt,
+        alpha: c_float,
+        x: *const c_float,
+        incx: LaInt,
+        y: *const c_float,
+        incy: LaInt,
+    ) -> c_float;
+    fn cblas_dsdot(
+        n: LaInt,
+        x: *const c_float,
+        incx: LaInt,
+        y: *const c_float,
+        incy: LaInt,
+    ) -> c_double;
+    fn cblas_sdot(
+        n: LaInt,
+        x: *const c_float,
+        incx: LaInt,
+        y: *const c_float,
+        incy: LaInt,
+    ) -> c_float;
+    fn cblas_ddot(
+        n: LaInt,
+        x: *const c_double,
+        incx: LaInt,
+        y: *const c_double,
+        incy: LaInt,
+    ) -> c_double;
+    fn cblas_cdotu_sub(
+        n: LaInt,
+        x: *const LaComplexFloat,
+        incx: LaInt,
+        y: *const LaComplexFloat,
+        incy: LaInt,
+        ret: *mut LaComplexFloat,
+    );
+    fn cblas_cdotc_sub(
+        n: LaInt,
+        x: *const LaComplexFloat,
+        incx: LaInt,
+        y: *const LaComplexFloat,
+        incy: LaInt,
+        ret: *mut LaComplexFloat,
+    );
+    fn cblas_zdotu_sub(
+        n: LaInt,
+        x: *const LaComplexDouble,
+        incx: LaInt,
+        y: *const LaComplexDouble,
+        incy: LaInt,
+        ret: *mut LaComplexDouble,
+    );
+    fn cblas_zdotc_sub(
+        n: LaInt,
+        x: *const LaComplexDouble,
+        incx: LaInt,
+        y: *const LaComplexDouble,
+        incy: LaInt,
+        ret: *mut LaComplexDouble,
+    );
+
+    fn cblas_sgemm(
+        layout: cblas_sys::CBLAS_LAYOUT,
+        transa: cblas_sys::CBLAS_TRANSPOSE,
+        transb: cblas_sys::CBLAS_TRANSPOSE,
+        m: LaInt,
+        n: LaInt,
+        k: LaInt,
+        alpha: c_float,
+        a: *const c_float,
+        lda: LaInt,
+        b: *const c_float,
+        ldb: LaInt,
+        beta: c_float,
+        c: *mut c_float,
+        ldc: LaInt,
+    );
+
+    fn cblas_dgemm(
+        layout: cblas_sys::CBLAS_LAYOUT,
+        transa: cblas_sys::CBLAS_TRANSPOSE,
+        transb: cblas_sys::CBLAS_TRANSPOSE,
+        m: LaInt,
+        n: LaInt,
+        k: LaInt,
+        alpha: c_double,
+        a: *const c_double,
+        lda: LaInt,
+        b: *const c_double,
+        ldb: LaInt,
+        beta: c_double,
+        c: *const c_double,
+        ldc: LaInt,
+    );
+
+    fn cblas_cgemm(
+        layout: cblas_sys::CBLAS_LAYOUT,
+        trans_a: cblas_sys::CBLAS_TRANSPOSE,
+        trans_b: cblas_sys::CBLAS_TRANSPOSE,
+        m: LaInt,
+        n: LaInt,
+        k: LaInt,
+        alpha: *const LaComplexFloat,
+        a: *const LaComplexFloat,
+        lda: LaInt,
+        b: *const LaComplexFloat,
+        ldb: LaInt,
+        beta: *const LaComplexFloat,
+        c: *mut LaComplexFloat,
+        ldc: LaInt,
+    );
+
+    fn cblas_zgemm(
+        layout: cblas_sys::CBLAS_LAYOUT,
+        trans_a: cblas_sys::CBLAS_TRANSPOSE,
+        trans_b: cblas_sys::CBLAS_TRANSPOSE,
+        m: LaInt,
+        n: LaInt,
+        k: LaInt,
+        alpha: *const LaComplexDouble,
+        a: *const LaComplexDouble,
+        lda: LaInt,
+        b: *const LaComplexDouble,
+        ldb: LaInt,
+        beta: *const LaComplexDouble,
+        c: *mut LaComplexDouble,
+        ldc: LaInt,
+    );
+}
+
+type CBlasSDSDotFn = unsafe extern "C" fn(
     n: LaInt,
     alpha: c_float,
     x: *const c_float,
@@ -506,7 +727,7 @@ type CBlasSDSDotFn = extern "C" fn(
     incy: LaInt,
 ) -> c_float;
 
-type CBlasDSDotFn = extern "C" fn(
+type CBlasDSDotFn = unsafe extern "C" fn(
     n: LaInt,
     x: *const c_float,
     incx: LaInt,
@@ -514,7 +735,7 @@ type CBlasDSDotFn = extern "C" fn(
     incy: LaInt,
 ) -> c_double;
 
-type CBlasSDotFn = extern "C" fn(
+type CBlasSDotFn = unsafe extern "C" fn(
     n: LaInt,
     x: *const c_float,
     incx: LaInt,
@@ -522,7 +743,7 @@ type CBlasSDotFn = extern "C" fn(
     incy: LaInt,
 ) -> c_float;
 
-type CBlasDDotFn = extern "C" fn(
+type CBlasDDotFn = unsafe extern "C" fn(
     n: LaInt,
     x: *const c_double,
     incx: LaInt,
@@ -530,16 +751,7 @@ type CBlasDDotFn = extern "C" fn(
     incy: LaInt,
 ) -> c_double;
 
-type CBlasCDotUSubFn = extern "C" fn(
-    n: LaInt,
-    x: *const LaComplexFloat,
-    incx: LaInt,
-    y: *const LaComplexFloat,
-    incy: LaInt,
-        ret: *mut LaComplexFloat,
-);
-
-type CBlasCDotCSubFn = extern "C" fn(
+type CBlasCDotUSubFn = unsafe extern "C" fn(
     n: LaInt,
     x: *const LaComplexFloat,
     incx: LaInt,
@@ -548,7 +760,16 @@ type CBlasCDotCSubFn = extern "C" fn(
     ret: *mut LaComplexFloat,
 );
 
-type CBlasZDotCSubFn = extern "C" fn(
+type CBlasCDotCSubFn = unsafe extern "C" fn(
+    n: LaInt,
+    x: *const LaComplexFloat,
+    incx: LaInt,
+    y: *const LaComplexFloat,
+    incy: LaInt,
+    ret: *mut LaComplexFloat,
+);
+
+type CBlasZDotCSubFn = unsafe extern "C" fn(
     n: LaInt,
     x: *const LaComplexDouble,
     incx: LaInt,
@@ -556,7 +777,7 @@ type CBlasZDotCSubFn = extern "C" fn(
     incy: LaInt,
     ret: *mut LaComplexDouble,
 );
-type CBlasZDotUSubFn = extern "C" fn(
+type CBlasZDotUSubFn = unsafe extern "C" fn(
     n: LaInt,
     x: *const LaComplexDouble,
     incx: LaInt,
@@ -565,42 +786,41 @@ type CBlasZDotUSubFn = extern "C" fn(
     ret: *mut LaComplexDouble,
 );
 
-type CBlasDGemmFn = extern "C" fn(
-    cblas_sys::CBLAS_LAYOUT,
-    cblas_sys::CBLAS_TRANSPOSE,
-    cblas_sys::CBLAS_TRANSPOSE,
-    LaInt,
-    LaInt,
-    LaInt,
-    c_double,
-    *const c_double,
-    LaInt,
-    *const c_double,
-    LaInt,
-    c_double,
-    *const c_double,
-    LaInt,
+type CBlasSGemmFn = unsafe extern "C" fn(
+    // Called Order in openblas
+    layout: cblas_sys::CBLAS_LAYOUT,
+    transa: cblas_sys::CBLAS_TRANSPOSE,
+    transb: cblas_sys::CBLAS_TRANSPOSE,
+    m: LaInt,
+    n: LaInt,
+    k: LaInt,
+    alpha: c_float,
+    a: *const c_float,
+    lda: LaInt,
+    b: *const c_float,
+    ldb: LaInt,
+    beta: c_float,
+    c: *mut c_float,
+    ldc: LaInt,
 );
-
-type CBlasSGemmFn = extern "C" fn(
-    cblas_sys::CBLAS_LAYOUT,
-    cblas_sys::CBLAS_TRANSPOSE,
-    cblas_sys::CBLAS_TRANSPOSE,
-    LaInt,
-    LaInt,
-    LaInt,
-    c_float,
-    *const c_float,
-    LaInt,
-    *const c_float,
-    LaInt,
-    c_float,
-    *mut c_float,
-    LaInt,
+type CBlasDGemmFn = unsafe extern "C" fn(
+    layout: cblas_sys::CBLAS_LAYOUT,
+    transa: cblas_sys::CBLAS_TRANSPOSE,
+    transb: cblas_sys::CBLAS_TRANSPOSE,
+    m: LaInt,
+    n: LaInt,
+    k: LaInt,
+    alpha: c_double,
+    a: *const c_double,
+    lda: LaInt,
+    b: *const c_double,
+    ldb: LaInt,
+    beta: c_double,
+    c: *const c_double,
+    ldc: LaInt,
 );
-
-type CBlasCGemmFn = extern "C" fn(
-    order: cblas_sys::CBLAS_LAYOUT,
+type CBlasCGemmFn = unsafe extern "C" fn(
+    layout: cblas_sys::CBLAS_LAYOUT,
     trans_a: cblas_sys::CBLAS_TRANSPOSE,
     trans_b: cblas_sys::CBLAS_TRANSPOSE,
     m: LaInt,
@@ -615,9 +835,8 @@ type CBlasCGemmFn = extern "C" fn(
     c: *mut LaComplexFloat,
     ldc: LaInt,
 );
-
-type CBlasZGemmFn = extern "C" fn(
-    order: cblas_sys::CBLAS_LAYOUT,
+type CBlasZGemmFn = unsafe extern "C" fn(
+    layout: cblas_sys::CBLAS_LAYOUT,
     trans_a: cblas_sys::CBLAS_TRANSPOSE,
     trans_b: cblas_sys::CBLAS_TRANSPOSE,
     m: LaInt,
