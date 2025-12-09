@@ -1,3 +1,5 @@
+#[cfg(feature = "static")]
+use std::marker::PhantomData;
 use std::{
     ffi::c_float,
     num::NonZeroI32,
@@ -5,6 +7,7 @@ use std::{
     os::raw::c_double,
 };
 
+#[cfg(feature = "dynamic")]
 use libloading::Symbol;
 use nalgebra::{ArrayStorage, Complex, Dim, Matrix, StorageMut, Vector, U1};
 
@@ -83,6 +86,7 @@ impl EigenRange<f64> {
 
 #[derive(Clone)]
 pub enum LapackeFunctions<'a> {
+    #[cfg(feature = "dynamic")]
     Dynamic {
         ssygvd: Symbol<'a, LapackeSsygvdFn>,
         dsygvd: Symbol<'a, LapackeDsygvdFn>,
@@ -98,15 +102,17 @@ pub enum LapackeFunctions<'a> {
         cgtsv: Symbol<'a, LapackeCgtsvFn>,
         zgtsv: Symbol<'a, LapackeZgtsvFn>,
     },
-    Static,
+    #[cfg(feature = "static")]
+    Static(PhantomData<&'a ()>),
 }
 
 impl<'a> LapackeFunctions<'a> {
     pub(crate) fn from_lib(lib: &LapackeLib) -> Self {
+        #[cfg(feature = "dynamic")]
         macro_rules! functions_dynamic {
             ( $( [$name: ident, $symbol: expr, $fn_signature: ty] ),* $(,)?) => {
+                let lib = lib.lib().unwrap();
                 $(
-                    let lib = lib.lib().unwrap();
                     let $name = unsafe {
                         std::mem::transmute(
                             lib
@@ -122,20 +128,30 @@ impl<'a> LapackeFunctions<'a> {
             };
         }
 
-        functions_dynamic! {
-            [ssygvd, b"LAPACKE_ssygvd", LapackeSsygvdFn],
-            [dsygvd, b"LAPACKE_dsygvd", LapackeDsygvdFn],
+        if lib.is_static() {
+            #[cfg(not(feature = "static"))]
+            panic!("Feature \"static\" is not enabled, cannot create lapacke functions.");
+            #[cfg(feature = "static")]
+            Self::Static(PhantomData)
+        } else {
+            #[cfg(not(feature = "dynamic"))]
+            unimplemented!("Feature \"dynamic\" is not enabled, cannot create lapacke functions.");
+            #[cfg(feature = "dynamic")]
+            functions_dynamic! {
+                [ssygvd, b"LAPACKE_ssygvd", LapackeSsygvdFn],
+                [dsygvd, b"LAPACKE_dsygvd", LapackeDsygvdFn],
 
-            [ssbevd, b"LAPACKE_ssbevd", LapackeSsbevdFn],
-            [dsbevd, b"LAPACKE_dsbevd", LapackeDsbevdFn],
+                [ssbevd, b"LAPACKE_ssbevd", LapackeSsbevdFn],
+                [dsbevd, b"LAPACKE_dsbevd", LapackeDsbevdFn],
 
-            [sstemr, b"LAPACKE_sstemr", LapackeSstemrFn],
-            [dstemr, b"LAPACKE_dstemr", LapackeDstemrFn],
+                [sstemr, b"LAPACKE_sstemr", LapackeSstemrFn],
+                [dstemr, b"LAPACKE_dstemr", LapackeDstemrFn],
 
-            [sgtsv, b"LAPACKE_sgtsv", LapackeSgtsvFn],
-            [dgtsv, b"LAPACKE_dgtsv", LapackeDgtsvFn],
-            [cgtsv, b"LAPACKE_cgtsv", LapackeCgtsvFn],
-            [zgtsv, b"LAPACKE_zgtsv", LapackeZgtsvFn],
+                [sgtsv, b"LAPACKE_sgtsv", LapackeSgtsvFn],
+                [dgtsv, b"LAPACKE_dgtsv", LapackeDgtsvFn],
+                [cgtsv, b"LAPACKE_cgtsv", LapackeCgtsvFn],
+                [zgtsv, b"LAPACKE_zgtsv", LapackeZgtsvFn],
+            }
         }
     }
 }
@@ -146,6 +162,14 @@ impl<'a> LapackeFunctions<'a> {
     pub const DEFAULT_ZF32: Option<&'static mut Matrix<f32, U1, U1, ArrayStorage<f32, 1, 1>>> =
         None;
 
+    pub fn raw_dsygvd(&self) -> LapackeDsygvdFn {
+        match self {
+            #[cfg(feature = "static")]
+            Self::Static(..) => LAPACKE_dsygvd,
+            #[cfg(feature = "dynamic")]
+            Self::Dynamic { dsygvd, .. } => **dsygvd,
+        }
+    }
     /// Solves an eigenvalue problem specified by the `problem_kind` argument.
     pub fn dsygvd<RA, CA, SA, RB, CB, SB, DW, SW>(
         &self,
@@ -174,21 +198,31 @@ impl<'a> LapackeFunctions<'a> {
         let lda = a.shape().0 as LaInt;
         let ldb = b.shape().0 as LaInt;
 
-        if let Some(err) = NonZeroI32::new((self.dsygvd)(
-            cblas_sys::CblasColMajor,
-            problem_kind.to_sys(),
-            output_kind.to_sys(),
-            uplo.to_sys(),
-            n,
-            a.data.ptr_mut(),
-            lda,
-            b.data.ptr_mut(),
-            ldb,
-            w.as_mut_ptr(),
-        )) {
+        if let Some(err) = NonZeroI32::new(unsafe {
+            (self.raw_dsygvd())(
+                cblas_sys::CblasColMajor,
+                problem_kind.to_sys(),
+                output_kind.to_sys(),
+                uplo.to_sys(),
+                n,
+                a.data.ptr_mut(),
+                lda,
+                b.data.ptr_mut(),
+                ldb,
+                w.as_mut_ptr(),
+            )
+        }) {
             Err(err)
         } else {
             Ok(())
+        }
+    }
+    pub fn raw_ssygvd(&self) -> LapackeSsygvdFn {
+        match self {
+            #[cfg(feature = "static")]
+            Self::Static(..) => LAPACKE_ssygvd,
+            #[cfg(feature = "dynamic")]
+            Self::Dynamic { ssygvd, .. } => **ssygvd,
         }
     }
     pub fn ssygvd<RA, CA, SA, RB, CB, SB, DW, SW>(
@@ -219,24 +253,34 @@ impl<'a> LapackeFunctions<'a> {
         let lda = a.data.strides().0.value() as LaInt;
         let ldb = b.data.strides().0.value() as LaInt;
 
-        if let Some(err) = NonZeroI32::new((self.ssygvd)(
-            cblas_sys::CblasColMajor,
-            problem_kind.to_sys(),
-            output_kind.to_sys(),
-            uplo.to_sys(),
-            n,
-            a.data.ptr_mut(),
-            lda,
-            b.data.ptr_mut(),
-            ldb,
-            w.as_mut_ptr(),
-        )) {
+        if let Some(err) = NonZeroI32::new(unsafe {
+            (self.raw_ssygvd())(
+                cblas_sys::CblasColMajor,
+                problem_kind.to_sys(),
+                output_kind.to_sys(),
+                uplo.to_sys(),
+                n,
+                a.data.ptr_mut(),
+                lda,
+                b.data.ptr_mut(),
+                ldb,
+                w.as_mut_ptr(),
+            )
+        }) {
             Err(err)
         } else {
             Ok(())
         }
     }
 
+    pub fn raw_ssbevd(&self) -> LapackeSsbevdFn {
+        match self {
+            #[cfg(feature = "static")]
+            Self::Static(..) => LAPACKE_ssbevd,
+            #[cfg(feature = "dynamic")]
+            Self::Dynamic { ssbevd, .. } => **ssbevd,
+        }
+    }
     pub fn ssbevd<RA, CA, SA, DW, SW, RZ, CZ, SZ>(
         &self,
         uplo: Uplo,
@@ -260,39 +304,49 @@ impl<'a> LapackeFunctions<'a> {
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;
-            if let Some(err) = NonZeroI32::new((self.ssbevd)(
-                cblas_sys::CblasColMajor,
-                EigenOutputKind::Value.to_sys(),
-                uplo.to_sys(),
-                n,
-                kd,
-                ab.as_mut_ptr(),
-                ldab,
-                w.as_mut_ptr(),
-                z.as_mut_ptr(),
-                ldz,
-            )) {
+            if let Some(err) = NonZeroI32::new(unsafe { (self.raw_ssbevd())(
+                            cblas_sys::CblasColMajor,
+                            EigenOutputKind::Value.to_sys(),
+                            uplo.to_sys(),
+                            n,
+                            kd,
+                            ab.as_mut_ptr(),
+                            ldab,
+                            w.as_mut_ptr(),
+                            z.as_mut_ptr(),
+                            ldz,
+                        ) }) {
                 Err(err)
             } else {
                 Ok(())
             }
         } else {
-            if let Some(err) = NonZeroI32::new((self.ssbevd)(
-                cblas_sys::CblasColMajor,
-                EigenOutputKind::Value.to_sys(),
-                uplo.to_sys(),
-                n,
-                kd,
-                ab.as_mut_ptr(),
-                ldab,
-                w.as_mut_ptr(),
-                std::ptr::null_mut(),
-                0,
-            )) {
+            if let Some(err) = NonZeroI32::new(unsafe {
+                (self.raw_ssbevd())(
+                    cblas_sys::CblasColMajor,
+                    EigenOutputKind::Value.to_sys(),
+                    uplo.to_sys(),
+                    n,
+                    kd,
+                    ab.as_mut_ptr(),
+                    ldab,
+                    w.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    0,
+                )
+            }) {
                 Err(err)
             } else {
                 Ok(())
             }
+        }
+    }
+    pub fn raw_dsbevd(&self) -> LapackeDsbevdFn {
+        match self {
+            #[cfg(feature = "static")]
+            Self::Static(..) => LAPACKE_dsbevd,
+            #[cfg(feature = "dynamic")]
+            Self::Dynamic { dsbevd, .. } => **dsbevd,
         }
     }
     pub fn dsbevd<RA, CA, SA, DW, SW, RZ, CZ, SZ>(
@@ -318,35 +372,35 @@ impl<'a> LapackeFunctions<'a> {
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;
-            if let Some(err) = NonZeroI32::new((self.dsbevd)(
-                cblas_sys::CblasColMajor,
-                EigenOutputKind::Value.to_sys(),
-                uplo.to_sys(),
-                n,
-                kd,
-                ab.as_mut_ptr(),
-                ldab,
-                w.as_mut_ptr(),
-                z.as_mut_ptr(),
-                ldz,
-            )) {
+            if let Some(err) = NonZeroI32::new(unsafe { (self.raw_dsbevd())(
+                            cblas_sys::CblasColMajor,
+                            EigenOutputKind::Value.to_sys(),
+                            uplo.to_sys(),
+                            n,
+                            kd,
+                            ab.as_mut_ptr(),
+                            ldab,
+                            w.as_mut_ptr(),
+                            z.as_mut_ptr(),
+                            ldz,
+                        ) }) {
                 Err(err)
             } else {
                 Ok(())
             }
         } else {
-            if let Some(err) = NonZeroI32::new((self.dsbevd)(
-                cblas_sys::CblasColMajor,
-                EigenOutputKind::Value.to_sys(),
-                uplo.to_sys(),
-                n,
-                kd,
-                ab.as_mut_ptr(),
-                ldab,
-                w.as_mut_ptr(),
-                std::ptr::null_mut(),
-                0,
-            )) {
+            if let Some(err) = NonZeroI32::new(unsafe { (self.raw_dsbevd())(
+                            cblas_sys::CblasColMajor,
+                            EigenOutputKind::Value.to_sys(),
+                            uplo.to_sys(),
+                            n,
+                            kd,
+                            ab.as_mut_ptr(),
+                            ldab,
+                            w.as_mut_ptr(),
+                            std::ptr::null_mut(),
+                            0,
+                        ) }) {
                 Err(err)
             } else {
                 Ok(())
@@ -354,6 +408,14 @@ impl<'a> LapackeFunctions<'a> {
         }
     }
 
+    pub fn raw_sstemr(&self) -> LapackeSstemrFn {
+        match self {
+            #[cfg(feature = "static")]
+            Self::Static(..) => LAPACKE_sstemr,
+            #[cfg(feature = "dynamic")]
+            Self::Dynamic { sstemr, .. } => **sstemr,
+        }
+    }
     pub fn sstemr<DD, SD, DE, SE, DW, SW, DS, SS, RZ, CZ, SZ>(
         &self,
         range: EigenRange<f32>,
@@ -392,54 +454,66 @@ impl<'a> LapackeFunctions<'a> {
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;
-            if let Some(err) = NonZeroI32::new((self.sstemr)(
-                cblas_sys::CblasColMajor,
-                EigenOutputKind::ValueVector.to_sys(),
-                range,
-                n,
-                diagonal.as_mut_ptr(),
-                off_diagonal.as_mut_ptr(),
-                vl,
-                vu,
-                il,
-                iu,
-                &mut m,
-                eig_out.as_mut_ptr(),
-                z.as_mut_ptr(),
-                ldz,
-                z.shape().1 as LaInt,
-                isuppz.as_mut_ptr(),
-                &mut tryrac,
-            ) as i32)
+            if let Some(err) = NonZeroI32::new(unsafe {
+                (self.raw_sstemr())(
+                    cblas_sys::CblasColMajor,
+                    EigenOutputKind::ValueVector.to_sys(),
+                    range,
+                    n,
+                    diagonal.as_mut_ptr(),
+                    off_diagonal.as_mut_ptr(),
+                    vl,
+                    vu,
+                    il,
+                    iu,
+                    &mut m,
+                    eig_out.as_mut_ptr(),
+                    z.as_mut_ptr(),
+                    ldz,
+                    z.shape().1 as LaInt,
+                    isuppz.as_mut_ptr(),
+                    &mut tryrac,
+                )
+            } as i32)
             {
                 return Err(err);
             }
         } else {
-            if let Some(err) = NonZeroI32::new((self.sstemr)(
-                cblas_sys::CblasColMajor,
-                EigenOutputKind::Value.to_sys(),
-                range,
-                n,
-                diagonal.as_mut_ptr(),
-                off_diagonal.as_mut_ptr(),
-                vl,
-                vu,
-                il,
-                iu,
-                &mut m,
-                eig_out.as_mut_ptr(),
-                std::ptr::null_mut(),
-                0,
-                0,
-                isuppz.as_mut_ptr(),
-                &mut tryrac,
-            )) {
+            if let Some(err) = NonZeroI32::new(unsafe {
+                (self.raw_sstemr())(
+                    cblas_sys::CblasColMajor,
+                    EigenOutputKind::Value.to_sys(),
+                    range,
+                    n,
+                    diagonal.as_mut_ptr(),
+                    off_diagonal.as_mut_ptr(),
+                    vl,
+                    vu,
+                    il,
+                    iu,
+                    &mut m,
+                    eig_out.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    isuppz.as_mut_ptr(),
+                    &mut tryrac,
+                )
+            }) {
                 return Err(err);
             }
         }
         Ok(m as usize)
     }
 
+    pub fn raw_dstemr(&self) -> LapackeDstemrFn {
+        match self {
+            #[cfg(feature = "static")]
+            Self::Static(..) => LAPACKE_dstemr,
+            #[cfg(feature = "dynamic")]
+            Self::Dynamic { dstemr, .. } => **dstemr,
+        }
+    }
     /// Calculates eigenvalues and optionally eigenvectors for a symmetric tridiagonal matrix, returns number of eigenvalues found.
     ///
     /// # Footguns
@@ -483,54 +557,66 @@ impl<'a> LapackeFunctions<'a> {
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;
-            if let Some(err) = NonZeroI32::new((self.dstemr)(
-                cblas_sys::CblasColMajor,
-                EigenOutputKind::ValueVector.to_sys(),
-                range,
-                n,
-                diagonal.as_mut_ptr(),
-                off_diagonal.as_mut_ptr(),
-                vl,
-                vu,
-                il,
-                iu,
-                &mut m,
-                eig_out.as_mut_ptr(),
-                z.as_mut_ptr(),
-                ldz,
-                z.shape().1 as LaInt,
-                isuppz.as_mut_ptr(),
-                &mut tryrac,
-            ) as i32)
+            if let Some(err) = NonZeroI32::new(unsafe {
+                (self.raw_dstemr())(
+                    cblas_sys::CblasColMajor,
+                    EigenOutputKind::ValueVector.to_sys(),
+                    range,
+                    n,
+                    diagonal.as_mut_ptr(),
+                    off_diagonal.as_mut_ptr(),
+                    vl,
+                    vu,
+                    il,
+                    iu,
+                    &mut m,
+                    eig_out.as_mut_ptr(),
+                    z.as_mut_ptr(),
+                    ldz,
+                    z.shape().1 as LaInt,
+                    isuppz.as_mut_ptr(),
+                    &mut tryrac,
+                )
+            } as i32)
             {
                 return Err(err);
             }
         } else {
-            if let Some(err) = NonZeroI32::new((self.dstemr)(
-                cblas_sys::CblasColMajor,
-                EigenOutputKind::Value.to_sys(),
-                range,
-                n,
-                diagonal.as_mut_ptr(),
-                off_diagonal.as_mut_ptr(),
-                vl,
-                vu,
-                il,
-                iu,
-                &mut m,
-                eig_out.as_mut_ptr(),
-                std::ptr::null_mut(),
-                0,
-                0,
-                isuppz.as_mut_ptr(),
-                &mut tryrac,
-            )) {
+            if let Some(err) = NonZeroI32::new(unsafe {
+                (self.raw_dstemr())(
+                    cblas_sys::CblasColMajor,
+                    EigenOutputKind::Value.to_sys(),
+                    range,
+                    n,
+                    diagonal.as_mut_ptr(),
+                    off_diagonal.as_mut_ptr(),
+                    vl,
+                    vu,
+                    il,
+                    iu,
+                    &mut m,
+                    eig_out.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    isuppz.as_mut_ptr(),
+                    &mut tryrac,
+                )
+            }) {
                 return Err(err);
             }
         }
         Ok(m as usize)
     }
 
+    pub fn raw_sgtsv(&self) -> LapackeSgtsvFn {
+        match self {
+            #[cfg(feature = "static")]
+            Self::Static(..) => LAPACKE_sgtsv,
+            #[cfg(feature = "dynamic")]
+            Self::Dynamic { sgtsv, .. } => **sgtsv,
+        }
+    }
     /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
     ///
     /// The solution will be stored in matrix b after calling.
@@ -555,19 +641,29 @@ impl<'a> LapackeFunctions<'a> {
         let n = diagonal.len() as LaInt;
         let ldb = b.shape().0 as LaInt;
         let nrhs = b.shape().1 as LaInt;
-        if let Some(err) = NonZeroI32::new((self.sgtsv)(
-            cblas_sys::CblasColMajor,
-            n,
-            nrhs,
-            lower_diagonal.as_mut_ptr(),
-            diagonal.as_mut_ptr(),
-            upper_diagonal.as_mut_ptr(),
-            b.as_mut_ptr(),
-            ldb,
-        )) {
+        if let Some(err) = NonZeroI32::new(unsafe {
+            (self.raw_sgtsv())(
+                cblas_sys::CblasColMajor,
+                n,
+                nrhs,
+                lower_diagonal.as_mut_ptr(),
+                diagonal.as_mut_ptr(),
+                upper_diagonal.as_mut_ptr(),
+                b.as_mut_ptr(),
+                ldb,
+            )
+        }) {
             Err(err)
         } else {
             Ok(())
+        }
+    }
+    pub fn raw_dgtsv(&self) -> LapackeDgtsvFn {
+        match self {
+            #[cfg(feature = "static")]
+            Self::Static(..) => LAPACKE_dgtsv,
+            #[cfg(feature = "dynamic")]
+            Self::Dynamic { dgtsv, .. } => **dgtsv,
         }
     }
     /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
@@ -594,19 +690,29 @@ impl<'a> LapackeFunctions<'a> {
         let n = diagonal.len() as LaInt;
         let ldb = b.shape().0 as LaInt;
         let nrhs = b.shape().1 as LaInt;
-        if let Some(err) = NonZeroI32::new((self.dgtsv)(
-            cblas_sys::CblasColMajor,
-            n,
-            nrhs,
-            lower_diagonal.as_mut_ptr(),
-            diagonal.as_mut_ptr(),
-            upper_diagonal.as_mut_ptr(),
-            b.as_mut_ptr(),
-            ldb,
-        )) {
+        if let Some(err) = NonZeroI32::new(unsafe {
+            (self.raw_dgtsv())(
+                cblas_sys::CblasColMajor,
+                n,
+                nrhs,
+                lower_diagonal.as_mut_ptr(),
+                diagonal.as_mut_ptr(),
+                upper_diagonal.as_mut_ptr(),
+                b.as_mut_ptr(),
+                ldb,
+            )
+        }) {
             Err(err)
         } else {
             Ok(())
+        }
+    }
+    pub fn raw_cgtsv(&self) -> LapackeCgtsvFn {
+        match self {
+            #[cfg(feature = "static")]
+            Self::Static(..) => LAPACKE_cgtsv,
+            #[cfg(feature = "dynamic")]
+            Self::Dynamic { cgtsv, .. } => **cgtsv,
         }
     }
     /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
@@ -633,19 +739,29 @@ impl<'a> LapackeFunctions<'a> {
         let n = diagonal.len() as LaInt;
         let ldb = b.shape().0 as LaInt;
         let nrhs = b.shape().1 as LaInt;
-        if let Some(err) = NonZeroI32::new((self.cgtsv)(
-            cblas_sys::CblasColMajor,
-            n,
-            nrhs,
-            lower_diagonal.as_mut_ptr(),
-            diagonal.as_mut_ptr(),
-            upper_diagonal.as_mut_ptr(),
-            b.as_mut_ptr(),
-            ldb,
-        )) {
+        if let Some(err) = NonZeroI32::new(unsafe {
+            (self.raw_cgtsv())(
+                cblas_sys::CblasColMajor,
+                n,
+                nrhs,
+                lower_diagonal.as_mut_ptr(),
+                diagonal.as_mut_ptr(),
+                upper_diagonal.as_mut_ptr(),
+                b.as_mut_ptr(),
+                ldb,
+            )
+        }) {
             Err(err)
         } else {
             Ok(())
+        }
+    }
+    pub fn raw_zgtsv(&self) -> LapackeZgtsvFn {
+        match self {
+            #[cfg(feature = "static")]
+            Self::Static(..) => LAPACKE_zgtsv,
+            #[cfg(feature = "dynamic")]
+            Self::Dynamic { zgtsv, .. } => **zgtsv,
         }
     }
     /// Performs a linear solve `AX=B` where A is a tridiagonal matrix.
@@ -672,16 +788,18 @@ impl<'a> LapackeFunctions<'a> {
         let n = diagonal.len() as LaInt;
         let ldb = b.shape().0 as LaInt;
         let nrhs = b.shape().1 as LaInt;
-        if let Some(err) = NonZeroI32::new((self.zgtsv)(
-            cblas_sys::CblasColMajor,
-            n,
-            nrhs,
-            lower_diagonal.as_mut_ptr(),
-            diagonal.as_mut_ptr(),
-            upper_diagonal.as_mut_ptr(),
-            b.as_mut_ptr(),
-            ldb,
-        )) {
+        if let Some(err) = NonZeroI32::new(unsafe {
+            (self.raw_zgtsv())(
+                cblas_sys::CblasColMajor,
+                n,
+                nrhs,
+                lower_diagonal.as_mut_ptr(),
+                diagonal.as_mut_ptr(),
+                upper_diagonal.as_mut_ptr(),
+                b.as_mut_ptr(),
+                ldb,
+            )
+        }) {
             Err(err)
         } else {
             Ok(())
@@ -756,7 +874,140 @@ impl EigenOutputKind {
     }
 }
 
-type LapackeSsygvdFn = extern "C" fn(
+#[cfg(feature = "static")]
+extern "C" {
+    fn LAPACKE_ssygvd(
+        matrix_layout: cblas_sys::CBLAS_LAYOUT, // matrix_layout
+        itype: LaInt,                           // itype
+        jobz: u8,                               // jobz
+        uplo: u8,                               // uplo
+        n: LaInt,                               // n
+        a: *mut c_float,                        // a
+        lda: LaInt,                             // lda
+        b: *mut c_float,                        // b
+        ldb: LaInt,                             // ldb
+        w: *mut c_float,                        // w
+    ) -> LaInt;
+
+    fn LAPACKE_dsygvd(
+        matrix_layout: cblas_sys::CBLAS_LAYOUT, // matrix_layout
+        itype: LaInt,                           // itype
+        jobz: u8,                               // jobz
+        uplo: u8,                               // uplo
+        n: LaInt,                               // n
+        a: *mut c_double,                       // a
+        lda: LaInt,                             // lda
+        b: *mut c_double,                       // b
+        ldb: LaInt,                             // ldb
+        w: *mut c_double,                       // w
+    ) -> LaInt;
+
+    fn LAPACKE_ssbevd(
+        matrix_layout: cblas_sys::CBLAS_LAYOUT,
+        jobz: u8,
+        uplo: u8,
+        n: LaInt,
+        kd: LaInt,
+        ab: *mut c_float,
+        ldab: LaInt,
+        w: *mut c_float,
+        z: *mut c_float,
+        ldz: LaInt,
+    ) -> LaInt;
+    fn LAPACKE_dsbevd(
+        matrix_layout: cblas_sys::CBLAS_LAYOUT,
+        jobz: u8,
+        uplo: u8,
+        n: LaInt,
+        kd: LaInt,
+        ab: *mut c_double,
+        ldab: LaInt,
+        w: *mut c_double,
+        z: *mut c_double,
+        ldz: LaInt,
+    ) -> LaInt;
+
+    fn LAPACKE_sstemr(
+        matrix_layout: cblas_sys::CBLAS_LAYOUT,
+        jobz: u8,
+        range: u8,
+        n: LaInt,
+        d: *mut c_float,
+        e: *mut c_float,
+        vl: c_float,
+        vu: c_float,
+        il: LaInt,
+        iu: LaInt,
+        m: *mut LaInt,
+        w: *mut c_float,
+        z: *mut c_float,
+        ldz: LaInt,
+        nzc: LaInt,
+        isuppz: *mut LaInt,
+        tryrac: *mut i32,
+    ) -> LaInt;
+    fn LAPACKE_dstemr(
+        matrix_layout: cblas_sys::CBLAS_LAYOUT,
+        jobz: u8,
+        range: u8,
+        n: LaInt,
+        d: *mut c_double,
+        e: *mut c_double,
+        vl: c_double,
+        vu: c_double,
+        il: LaInt,
+        iu: LaInt,
+        m: *mut LaInt,
+        w: *mut c_double,
+        z: *mut c_double,
+        ldz: LaInt,
+        nzc: LaInt,
+        isuppz: *mut LaInt,
+        tryrac: *mut i32, // bool
+    ) -> LaInt;
+    fn LAPACKE_sgtsv(
+        matrix_layout: cblas_sys::CBLAS_LAYOUT,
+        n: LaInt,
+        nrhs: LaInt,
+        dl: *mut c_float,
+        d: *mut c_float,
+        du: *mut c_float,
+        b: *mut c_float,
+        ldb: LaInt,
+    ) -> LaInt;
+    fn LAPACKE_dgtsv(
+        matrix_layout: cblas_sys::CBLAS_LAYOUT,
+        n: LaInt,
+        nrhs: LaInt,
+        dl: *mut c_double,
+        d: *mut c_double,
+        du: *mut c_double,
+        b: *mut c_double,
+        ldb: LaInt,
+    ) -> LaInt;
+    fn LAPACKE_cgtsv(
+        matrix_layout: cblas_sys::CBLAS_LAYOUT,
+        n: LaInt,
+        nrhs: LaInt,
+        dl: *mut LaComplexFloat,
+        d: *mut LaComplexFloat,
+        du: *mut LaComplexFloat,
+        b: *mut LaComplexFloat,
+        ldb: LaInt,
+    ) -> LaInt;
+    fn LAPACKE_zgtsv(
+        matrix_layout: cblas_sys::CBLAS_LAYOUT,
+        n: LaInt,
+        nrhs: LaInt,
+        dl: *mut LaComplexDouble,
+        d: *mut LaComplexDouble,
+        du: *mut LaComplexDouble,
+        b: *mut LaComplexDouble,
+        ldb: LaInt,
+    ) -> LaInt;
+}
+
+type LapackeSsygvdFn = unsafe extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT, // matrix_layout
     itype: LaInt,                           // itype
     jobz: u8,                               // jobz
@@ -768,7 +1019,7 @@ type LapackeSsygvdFn = extern "C" fn(
     ldb: LaInt,                             // ldb
     w: *mut c_float,                        // w
 ) -> LaInt;
-type LapackeDsygvdFn = extern "C" fn(
+type LapackeDsygvdFn = unsafe extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT, // matrix_layout
     itype: LaInt,                           // itype
     jobz: u8,                               // jobz
@@ -781,7 +1032,7 @@ type LapackeDsygvdFn = extern "C" fn(
     w: *mut c_double,                       // w
 ) -> LaInt;
 
-type LapackeSsbevdFn = extern "C" fn(
+type LapackeSsbevdFn = unsafe extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     jobz: u8,
     uplo: u8,
@@ -793,7 +1044,7 @@ type LapackeSsbevdFn = extern "C" fn(
     z: *mut c_float,
     ldz: LaInt,
 ) -> LaInt;
-type LapackeDsbevdFn = extern "C" fn(
+type LapackeDsbevdFn = unsafe extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     jobz: u8,
     uplo: u8,
@@ -806,7 +1057,7 @@ type LapackeDsbevdFn = extern "C" fn(
     ldz: LaInt,
 ) -> LaInt;
 
-type LapackeSstemrFn = extern "C" fn(
+type LapackeSstemrFn = unsafe extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     jobz: u8,
     range: u8,
@@ -825,7 +1076,7 @@ type LapackeSstemrFn = extern "C" fn(
     isuppz: *mut LaInt,
     tryrac: *mut i32,
 ) -> LaInt;
-type LapackeDstemrFn = extern "C" fn(
+type LapackeDstemrFn = unsafe extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     jobz: u8,
     range: u8,
@@ -845,7 +1096,7 @@ type LapackeDstemrFn = extern "C" fn(
     tryrac: *mut i32, // bool
 ) -> LaInt;
 
-type LapackeSgtsvFn = extern "C" fn(
+type LapackeSgtsvFn = unsafe extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     n: LaInt,
     nrhs: LaInt,
@@ -855,7 +1106,7 @@ type LapackeSgtsvFn = extern "C" fn(
     b: *mut c_float,
     ldb: LaInt,
 ) -> LaInt;
-type LapackeDgtsvFn = extern "C" fn(
+type LapackeDgtsvFn = unsafe extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     n: LaInt,
     nrhs: LaInt,
@@ -865,7 +1116,7 @@ type LapackeDgtsvFn = extern "C" fn(
     b: *mut c_double,
     ldb: LaInt,
 ) -> LaInt;
-type LapackeCgtsvFn = extern "C" fn(
+type LapackeCgtsvFn = unsafe extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     n: LaInt,
     nrhs: LaInt,
@@ -875,7 +1126,7 @@ type LapackeCgtsvFn = extern "C" fn(
     b: *mut LaComplexFloat,
     ldb: LaInt,
 ) -> LaInt;
-type LapackeZgtsvFn = extern "C" fn(
+type LapackeZgtsvFn = unsafe extern "C" fn(
     matrix_layout: cblas_sys::CBLAS_LAYOUT,
     n: LaInt,
     nrhs: LaInt,

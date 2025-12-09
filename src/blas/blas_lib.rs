@@ -7,7 +7,6 @@ use crate::error::LaError;
 
 use super::{
     functions::{BlasFunctions, BlasFunctionsStatic},
-    util::{find_lib_path, find_lib_path_with_additional_search_paths},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -57,8 +56,10 @@ pub struct BlasLibInner {
 
 impl Drop for BlasLibInner {
     fn drop(&mut self) {
+        #[cfg(feature = "dynamic")]
         if let BlasBackend::OpenBlas = self.backend {}
 
+        #[cfg(feature = "dynamic")]
         if let BlasBackend::IntelMkl = self.backend {
             // If the backend is Intel the library must be loaded in.
             let lib = self.lib.as_ref().unwrap();
@@ -104,7 +105,14 @@ impl Threading {
     }
 }
 
-const BACKEND_PRIORITY: &[BlasBackend] = &[BlasBackend::IntelMkl, BlasBackend::OpenBlas];
+const BACKEND_PRIORITY: &[BlasBackend] = &[
+    #[cfg(feature = "dynamic")]
+    BlasBackend::IntelMkl,
+    #[cfg(feature = "dynamic")]
+    BlasBackend::OpenBlas,
+    #[cfg(feature = "static")]
+    BlasBackend::Static,
+];
 
 impl BlasLib {
     pub fn new() -> Result<Self, LaError> {
@@ -147,7 +155,9 @@ impl BlasLib {
     }
 
     pub fn set_threading(&self, threading: Threading) {
+
         match self.backend() {
+            #[cfg(feature = "dynamic")]
             BlasBackend::IntelMkl => {
                 type MklSetThreadingLayerFn = extern "C" fn(i32);
                 let mkl_set_threading_layer: Symbol<MklSetThreadingLayerFn> =
@@ -155,13 +165,22 @@ impl BlasLib {
                         .expect("Cannot find MKL_Set_Threading_layer");
                 mkl_set_threading_layer(threading.intel())
             }
+            #[cfg(not(feature = "dynamic"))]
+            BlasBackend::IntelMkl => {
+                _ = threading;
+            }
+            #[cfg(feature = "dynamic")]
             BlasBackend::OpenBlas => {}
+            #[cfg(not(feature = "dynamic"))]
+            BlasBackend::OpenBlas => {}
+
             BlasBackend::Static => {}
         }
     }
 
     pub fn set_num_threads(&self, threads: u32) {
         match self.backend() {
+            #[cfg(feature = "dynamic")]
             BlasBackend::IntelMkl => {
                 type MklSetNumThreadsFn = extern "C" fn(i32);
                 let mkl_set_num_threads: Symbol<MklSetNumThreadsFn> =
@@ -169,6 +188,11 @@ impl BlasLib {
                         .expect("Cannot find MKL_Set_Num_Threads");
                 mkl_set_num_threads(threads as i32)
             }
+            #[cfg(not(feature = "dynamic"))]
+            BlasBackend::IntelMkl => {
+                _ = threads;
+            }
+            #[cfg(feature = "dynamic")]
             BlasBackend::OpenBlas => {
                 type OpenBlasSetNumThreadsFn = extern "C" fn(i32);
                 let mkl_set_num_threads: Symbol<OpenBlasSetNumThreadsFn> =
@@ -176,13 +200,18 @@ impl BlasLib {
                         .expect("Cannot find openblas_set_num_threads");
                 mkl_set_num_threads(threads as i32)
             }
+            #[cfg(not(feature = "dynamic"))]
+            BlasBackend::OpenBlas => {}
             BlasBackend::Static => {}
         }
     }
 
     pub fn with_backend(backend: BlasBackend) -> Result<Self, LaError> {
         match backend {
+            #[cfg(feature = "dynamic")]
             BlasBackend::IntelMkl | BlasBackend::OpenBlas => {
+                use crate::util::find_lib_path;
+
                 let lib_path = find_lib_path(backend.lib_name().unwrap())?;
                 let lib = unsafe { Library::new(lib_path) }?;
                 Ok(Self(Arc::new(BlasLibInner {
@@ -190,7 +219,13 @@ impl BlasLib {
                     backend,
                 })))
             }
-            BlasBackend::Static => Ok(Self(Arc::new(BlasLibInner { lib: None, backend }))),
+            #[cfg(not(feature = "dynamic"))]
+            BlasBackend::IntelMkl | BlasBackend::OpenBlas => Err(LaError::NoLaLibrary),
+            BlasBackend::Static => Ok(Self(Arc::new(BlasLibInner {
+                #[cfg(feature = "dynamic")]
+                lib: None,
+                backend,
+            }))),
         }
     }
 
@@ -201,8 +236,16 @@ impl BlasLib {
     where
         P: AsRef<Path>,
     {
+        #[cfg(not(feature = "dynamic"))]
+        {
+            _ = additional_search_paths;
+        }
+
         match backend {
+            #[cfg(feature = "dynamic")]
             BlasBackend::IntelMkl | BlasBackend::OpenBlas => {
+                use crate::util::find_lib_path_with_additional_search_paths;
+
                 let lib_path = find_lib_path_with_additional_search_paths(
                     backend.lib_name().unwrap(),
                     additional_search_paths,
@@ -213,7 +256,13 @@ impl BlasLib {
                     backend,
                 })))
             }
-            BlasBackend::Static => Ok(Self(Arc::new(BlasLibInner { lib: None, backend }))),
+            #[cfg(not(feature = "dynamic"))]
+            BlasBackend::IntelMkl | BlasBackend::OpenBlas => Err(LaError::NoLaLibrary),
+            BlasBackend::Static => Ok(Self(Arc::new(BlasLibInner {
+                #[cfg(feature = "dynamic")]
+                lib: None,
+                backend,
+            }))),
         }
     }
 

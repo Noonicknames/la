@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.85"
 
 [features]
-default = ["dynamic", "static"]
+default = ["dynamic"]
 dynamic = ["dep:libloading"]
 static = []
 static-intelmkl = ["static"]

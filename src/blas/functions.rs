@@ -1,3 +1,5 @@
+#[cfg(feature = "static")]
+use std::marker::PhantomData;
 use std::{
     ffi::{c_double, c_float},
     ops::Deref,
@@ -33,11 +35,12 @@ pub enum BlasFunctions<'a> {
         zgemm: Symbol<'a, CBlasZGemmFn>,
     },
     #[cfg(feature = "static")]
-    Static,
+    Static(PhantomData<&'a ()>),
 }
 
 impl<'a> BlasFunctions<'a> {
     pub(crate) fn from_lib(lib: &BlasLib) -> Self {
+        #[cfg(feature = "dynamic")]
         macro_rules! functions_dynamic {
             ( $( [$name: ident, $symbol: expr, $fn_signature: ty] ),* $(,)?) => {
                 let lib = lib.lib().unwrap();
@@ -58,6 +61,7 @@ impl<'a> BlasFunctions<'a> {
         }
 
         match lib.backend() {
+            #[cfg(feature = "dynamic")]
             BlasBackend::IntelMkl | BlasBackend::OpenBlas => {
                 functions_dynamic! {
                     [sdsdot, b"cblas_sdsdot", CBlasSDSDotFn],
@@ -75,7 +79,14 @@ impl<'a> BlasFunctions<'a> {
                     [zgemm, b"cblas_zgemm", CBlasZGemmFn],
                 }
             }
-            BlasBackend::Static => Self::Static,
+            #[cfg(not(feature = "dynamic"))]
+            BlasBackend::IntelMkl | BlasBackend::OpenBlas => {
+                panic!("Feature \"dynamic\" not enabled, cannot create BlasFunctions.");
+            }
+            #[cfg(feature = "static")]
+            BlasBackend::Static => Self::Static(PhantomData),
+            #[cfg(not(feature = "static"))]
+            BlasBackend::Static => panic!("Cannot create blas functions, \"static\" feature not enabled."),
         }
     }
 }
@@ -83,8 +94,10 @@ impl<'a> BlasFunctions<'a> {
 impl<'a> BlasFunctions<'a> {
     pub fn raw_sdsdot(&self) -> CBlasSDSDotFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { sdsdot, .. } => **sdsdot,
-            Self::Static => cblas_sdsdot,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_sdsdot,
         }
     }
     /// Performs `dot(x,y) + alpha`.
@@ -116,8 +129,10 @@ impl<'a> BlasFunctions<'a> {
 
     pub fn raw_dsdot(&self) -> CBlasDSDotFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { dsdot, .. } => **dsdot,
-            Self::Static => cblas_dsdot,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_dsdot,
         }
     }
     /// Performs `dot(x,y)`.
@@ -147,8 +162,10 @@ impl<'a> BlasFunctions<'a> {
 
     pub fn raw_sdot(&self) -> CBlasSDotFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { sdot, .. } => **sdot,
-            Self::Static => cblas_sdot,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_sdot,
         }
     }
     /// Performs `dot(x,y)`.
@@ -177,8 +194,10 @@ impl<'a> BlasFunctions<'a> {
 
     pub fn raw_cdotu_sub(&self) -> CBlasCDotUSubFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { cdotu_sub, .. } => **cdotu_sub,
-            Self::Static => cblas_cdotu_sub,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_cdotu_sub,
         }
     }
     /// Performs `dot(x,y)`.
@@ -212,8 +231,10 @@ impl<'a> BlasFunctions<'a> {
 
     pub fn raw_cdotc_sub(&self) -> CBlasCDotCSubFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { cdotc_sub, .. } => **cdotc_sub,
-            Self::Static => cblas_cdotc_sub,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_cdotc_sub,
         }
     }
     /// Performs `dot(conj(x),y)`.
@@ -247,8 +268,10 @@ impl<'a> BlasFunctions<'a> {
 
     pub fn raw_zdotu_sub(&self) -> CBlasZDotUSubFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { zdotu_sub, .. } => **zdotu_sub,
-            Self::Static => cblas_zdotu_sub,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_zdotu_sub,
         }
     }
     /// Performs `dot(conj(x),y)`.
@@ -282,8 +305,10 @@ impl<'a> BlasFunctions<'a> {
 
     pub fn raw_zdotc_sub(&self) -> CBlasZDotCSubFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { zdotc_sub, .. } => **zdotc_sub,
-            Self::Static => cblas_zdotc_sub,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_zdotc_sub,
         }
     }
     /// Performs `dot(conj(x),y)`.
@@ -317,8 +342,10 @@ impl<'a> BlasFunctions<'a> {
 
     pub fn raw_ddot(&self) -> CBlasDDotFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { ddot, .. } => **ddot,
-            Self::Static => cblas_ddot,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_ddot,
         }
     }
     /// Performs `dot(x,y)`.
@@ -340,8 +367,10 @@ impl<'a> BlasFunctions<'a> {
 
     pub fn raw_sgemm(&self) -> CBlasSGemmFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { sgemm, .. } => **sgemm,
-            Self::Static => cblas_sgemm,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_sgemm,
         }
     }
     /// Performs c := alpha * trans_a(a) * trans_b(b) + beta*c
@@ -398,8 +427,10 @@ impl<'a> BlasFunctions<'a> {
     }
     pub fn raw_dgemm(&self) -> CBlasDGemmFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { dgemm, .. } => **dgemm,
-            Self::Static => cblas_dgemm,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_dgemm,
         }
     }
     /// Performs c := alpha * op_a(a) * op_b(b) + beta*c
@@ -456,8 +487,10 @@ impl<'a> BlasFunctions<'a> {
     }
     pub fn raw_cgemm(&self) -> CBlasCGemmFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { cgemm, .. } => **cgemm,
-            Self::Static => cblas_cgemm,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_cgemm,
         }
     }
     /// Performs c := alpha * trans_a(a) * trans_b(b) + beta*c
@@ -515,8 +548,10 @@ impl<'a> BlasFunctions<'a> {
 
     pub fn raw_zgemm(&self) -> CBlasZGemmFn {
         match self {
+            #[cfg(feature = "dynamic")]
             Self::Dynamic { zgemm, .. } => **zgemm,
-            Self::Static => cblas_zgemm,
+            #[cfg(feature = "static")]
+            Self::Static(..) => cblas_zgemm,
         }
     }
     /// Performs c := alpha * trans_a(a) * trans_b(b) + beta*c
@@ -586,6 +621,7 @@ impl Deref for BlasFunctionsStatic {
     }
 }
 
+#[cfg(feature = "static")]
 extern "C" {
     fn cblas_sdsdot(
         n: LaInt,
