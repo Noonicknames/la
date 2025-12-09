@@ -6,6 +6,7 @@ mod blas;
 mod lapacke;
 mod error;
 mod types;
+pub(crate) mod util;
 
 pub use blas::*;
 pub use lapacke::*;

@@ -4,8 +4,8 @@ use nalgebra::{DMatrix, DVector};
 fn main() {
     let blas_lib = BlasLib::new().expect("Failed to include Blas backend.");
     println!("Using backend: {:?}", blas_lib.backend());
-    // blas_lib.set_threading(Threading::Multithreaded);
-    // blas_lib.set_num_threads(8);
+    blas_lib.set_threading(Threading::Multithreaded);
+    blas_lib.set_num_threads(8);
     let lapacke_lib = LapackeLib::new(&blas_lib).unwrap();
     let lapacke = lapacke_lib.functions();
 

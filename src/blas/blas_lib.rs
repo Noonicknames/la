@@ -1,3 +1,5 @@
+#[cfg(feature = "static")]
+use std::ffi::c_int;
 use std::{path::Path, sync::Arc};
 
 #[cfg(feature = "dynamic")]
@@ -50,6 +52,7 @@ pub enum BlasLibInner {
     #[cfg(feature = "dynamic")]
     IntelMkl {
         lib: Library,
+        #[cfg(unix)]
         #[allow(unused)]
         libm: Library,
     },
@@ -104,7 +107,7 @@ impl Threading {
     pub fn intel(&self) -> i32 {
         match self {
             Self::Sequential => 1,
-            Self::Multithreaded => 0,
+            Self::Multithreaded => 3,
         }
     }
 }
@@ -172,7 +175,12 @@ impl BlasLib {
                         .expect("Cannot find MKL_Set_Threading_layer");
                 mkl_set_threading_layer(threading.intel())
             }
-            _ => todo!(),
+            BlasLibInner::OpenBlas { .. } => {}
+            #[cfg(feature = "static")]
+            BlasLibInner::Static => {
+                #[cfg(feature = "static-intelmkl")]
+                MKL_Set_Threading_Layer(threading.intel());
+            }
         }
     }
 
@@ -198,9 +206,16 @@ impl BlasLib {
                         .expect("Cannot find openblas_set_num_threads");
                 mkl_set_num_threads(threads as i32)
             }
-            #[cfg(not(feature = "dynamic"))]
-            BlasBackend::OpenBlas => {}
-            BlasBackend::Static => {}
+            BlasBackend::Static => {
+                #[cfg(feature = "static-intelmkl")]
+                unsafe {
+                    MKL_Set_Num_Threads(threads as c_int);
+                }
+                #[cfg(feature = "static-openblas")]
+                unsafe {
+                    openblas_set_num_threads(threads as c_int);
+                }
+            }
         }
     }
 
@@ -209,12 +224,28 @@ impl BlasLib {
             #[cfg(feature = "dynamic")]
             BlasBackend::IntelMkl => {
                 use crate::util::find_lib_path;
-
-                let lib_path = find_lib_path("mkl_rt")?;
-                let libm_path = find_lib_path("m")?;
-                let libm = unsafe { Library::new(libm_path) }?;
-                let lib = unsafe { Library::new(lib_path) }?;
-                Ok(Self(Arc::new(BlasLibInner::IntelMkl { lib, libm })))
+                #[cfg(unix)]
+                {
+                    let lib_path = find_lib_path("mkl_rt")?;
+                    let libm_path = find_lib_path("m")?;
+                    let libm = unsafe { libloading::os::unix::Library::new(libm_path) }?;
+                    let lib = unsafe {
+                        libloading::os::unix::Library::open(
+                            Some(lib_path),
+                            libloading::os::unix::RTLD_GLOBAL,
+                        )
+                    }?;
+                    Ok(Self(Arc::new(BlasLibInner::IntelMkl {
+                        lib: lib.into(),
+                        libm: libm.into(),
+                    })))
+                }
+                #[cfg(not(unix))]
+                {
+                    let lib_path = find_lib_path("mkl_rt")?;
+                    let lib = unsafe { Library::new(lib_path) }?;
+                    Ok(Self(Arc::new(BlasLibInner::IntelMkl { lib })))
+                }
             }
             #[cfg(feature = "dynamic")]
             BlasBackend::OpenBlas => {
@@ -244,16 +275,40 @@ impl BlasLib {
             #[cfg(feature = "dynamic")]
             BlasBackend::IntelMkl => {
                 use crate::util::find_lib_path_with_additional_search_paths;
-
-                let lib_path = find_lib_path_with_additional_search_paths(
-                    "mkl_rt",
-                    additional_search_paths.clone(),
-                )?;
-                let libm_path =
-                    find_lib_path_with_additional_search_paths("m", additional_search_paths)?;
-                let libm = unsafe { Library::new(libm_path) }?;
-                let lib = unsafe { Library::new(lib_path) }?;
-                Ok(Self(Arc::new(BlasLibInner::IntelMkl { lib, libm })))
+                #[cfg(unix)]
+                {
+                    let lib_path = find_lib_path_with_additional_search_paths(
+                        "mkl_rt",
+                        additional_search_paths.clone(),
+                    )?;
+                    let libm_path =
+                        find_lib_path_with_additional_search_paths("m", additional_search_paths)?;
+                    let libm = unsafe {
+                        libloading::os::unix::Library::open(
+                            Some(libm_path),
+                            libloading::os::unix::RTLD_GLOBAL,
+                        )
+                    }?;
+                    let lib = unsafe {
+                        libloading::os::unix::Library::open(
+                            Some(lib_path),
+                            libloading::os::unix::RTLD_GLOBAL,
+                        )
+                    }?;
+                    Ok(Self(Arc::new(BlasLibInner::IntelMkl {
+                        lib: lib.into(),
+                        libm: libm.into(),
+                    })))
+                }
+                #[cfg(not(unix))]
+                {
+                    let lib_path = find_lib_path_with_additional_search_paths(
+                        "mkl_rt",
+                        additional_search_paths,
+                    )?;
+                    let lib = unsafe { Library::new(lib_path) }?;
+                    Ok(Self(Arc::new(BlasLibInner::IntelMkl { lib })))
+                }
             }
             #[cfg(feature = "dynamic")]
             BlasBackend::OpenBlas => {
@@ -297,6 +352,17 @@ impl BlasLib {
     pub fn functions(&self) -> BlasFunctions<'_> {
         BlasFunctions::from_lib(self)
     }
+}
+
+#[cfg(feature = "static-intelmkl")]
+extern "C" {
+    fn MKL_Set_Num_Threads(nth: c_int);
+    fn MKL_Set_Threading_Layer(code: c_int) -> c_int;
+}
+
+#[cfg(feature = "static-openblas")]
+extern "C" {
+    fn openblas_set_num_threads(num_threads: c_int);
 }
 
 #[cfg(test)]

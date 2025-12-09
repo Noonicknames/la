@@ -4,8 +4,8 @@ fn main() {
     let blas_lib =
         BlasLib::new().expect("Failed to include Blas backend.");
     println!("Using backend: {:?}", blas_lib.backend());
-    // blas_lib.set_threading(Threading::Multithreaded);
-    // blas_lib.set_num_threads(8);
+    blas_lib.set_threading(Threading::Multithreaded);
+    blas_lib.set_num_threads(8);
     let blas = blas_lib.functions();
 
     let a = nalgebra::DMatrix::from_iterator(
