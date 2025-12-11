@@ -304,18 +304,20 @@ impl<'a> LapackeFunctions<'a> {
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;
-            if let Some(err) = NonZeroI32::new(unsafe { (self.raw_ssbevd())(
-                            cblas_sys::CblasColMajor,
-                            EigenOutputKind::Value.to_sys(),
-                            uplo.to_sys(),
-                            n,
-                            kd,
-                            ab.as_mut_ptr(),
-                            ldab,
-                            w.as_mut_ptr(),
-                            z.as_mut_ptr(),
-                            ldz,
-                        ) }) {
+            if let Some(err) = NonZeroI32::new(unsafe {
+                (self.raw_ssbevd())(
+                    cblas_sys::CblasColMajor,
+                    EigenOutputKind::Value.to_sys(),
+                    uplo.to_sys(),
+                    n,
+                    kd,
+                    ab.as_mut_ptr(),
+                    ldab,
+                    w.as_mut_ptr(),
+                    z.as_mut_ptr(),
+                    ldz,
+                )
+            }) {
                 Err(err)
             } else {
                 Ok(())
@@ -372,35 +374,39 @@ impl<'a> LapackeFunctions<'a> {
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;
-            if let Some(err) = NonZeroI32::new(unsafe { (self.raw_dsbevd())(
-                            cblas_sys::CblasColMajor,
-                            EigenOutputKind::Value.to_sys(),
-                            uplo.to_sys(),
-                            n,
-                            kd,
-                            ab.as_mut_ptr(),
-                            ldab,
-                            w.as_mut_ptr(),
-                            z.as_mut_ptr(),
-                            ldz,
-                        ) }) {
+            if let Some(err) = NonZeroI32::new(unsafe {
+                (self.raw_dsbevd())(
+                    cblas_sys::CblasColMajor,
+                    EigenOutputKind::Value.to_sys(),
+                    uplo.to_sys(),
+                    n,
+                    kd,
+                    ab.as_mut_ptr(),
+                    ldab,
+                    w.as_mut_ptr(),
+                    z.as_mut_ptr(),
+                    ldz,
+                )
+            }) {
                 Err(err)
             } else {
                 Ok(())
             }
         } else {
-            if let Some(err) = NonZeroI32::new(unsafe { (self.raw_dsbevd())(
-                            cblas_sys::CblasColMajor,
-                            EigenOutputKind::Value.to_sys(),
-                            uplo.to_sys(),
-                            n,
-                            kd,
-                            ab.as_mut_ptr(),
-                            ldab,
-                            w.as_mut_ptr(),
-                            std::ptr::null_mut(),
-                            0,
-                        ) }) {
+            if let Some(err) = NonZeroI32::new(unsafe {
+                (self.raw_dsbevd())(
+                    cblas_sys::CblasColMajor,
+                    EigenOutputKind::Value.to_sys(),
+                    uplo.to_sys(),
+                    n,
+                    kd,
+                    ab.as_mut_ptr(),
+                    ldab,
+                    w.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    0,
+                )
+            }) {
                 Err(err)
             } else {
                 Ok(())
@@ -548,12 +554,13 @@ impl<'a> LapackeFunctions<'a> {
         let (vl, vu) = range.get_sys_value().unwrap_or_default();
         let range = range.to_sys_char();
 
+        assert!((isuppz.len() * 2) as i32 > iu - il);
+
         let mut m = 0 as LaInt;
         let mut tryrac = 0 as i32;
 
-        let range_display = char::from_u32(range as u32).unwrap();
-
-        println!("n = {n}\nil = {il}, iu = {iu}\nvl = {vl}, vu = {vu}\nrange = {range_display}\nm = {m}\ntryrac = {tryrac}");
+        // let range_display = char::from_u32(range as u32).unwrap();
+        // println!("n = {n}\nil = {il}, iu = {iu}\nvl = {vl}, vu = {vu}\nrange = {range_display}\nm = {m}\ntryrac = {tryrac}");
 
         if let Some(z) = z {
             let ldz = z.shape().0 as LaInt;

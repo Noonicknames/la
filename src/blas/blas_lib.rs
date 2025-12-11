@@ -224,9 +224,10 @@ impl BlasLib {
             #[cfg(feature = "dynamic")]
             BlasBackend::IntelMkl => {
                 use crate::util::find_lib_path;
+
+                let lib_path = find_lib_path("mkl_rt")?;
                 #[cfg(unix)]
                 {
-                    let lib_path = find_lib_path("mkl_rt")?;
                     let libm_path = find_lib_path("m")?;
                     let libm = unsafe { libloading::os::unix::Library::new(libm_path) }?;
                     let lib = unsafe {
@@ -242,7 +243,6 @@ impl BlasLib {
                 }
                 #[cfg(not(unix))]
                 {
-                    let lib_path = find_lib_path("mkl_rt")?;
                     let lib = unsafe { Library::new(lib_path) }?;
                     Ok(Self(Arc::new(BlasLibInner::IntelMkl { lib })))
                 }
@@ -252,7 +252,16 @@ impl BlasLib {
                 use crate::util::find_lib_path;
 
                 let lib_path = find_lib_path("openblas")?;
+                #[cfg(not(unix))]
                 let lib = unsafe { Library::new(lib_path) }?;
+                #[cfg(unix)]
+                let lib = unsafe {
+                    libloading::os::unix::Library::open(
+                        Some(lib_path),
+                        libloading::os::unix::RTLD_LAZY, //| 0x01000,
+                    )
+                }?
+                .into();
                 Ok(Self(Arc::new(BlasLibInner::OpenBlas { lib })))
             }
             #[cfg(not(feature = "dynamic"))]

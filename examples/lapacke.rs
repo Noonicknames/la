@@ -11,7 +11,7 @@ fn main() {
 
     let mut diagonal = DVector::from_vec(vec![1.0; 10]);
     let mut off_diagonal = DVector::from_vec(vec![1.0; 10]);
-    let mut isuppz = DVector::from_vec(vec![0; 10]);
+    let mut isuppz = DVector::from_vec(vec![0; 2*10]);
     let mut eig_out = DVector::from_vec(vec![0.0; 10]);
     let mut eig_vec_out = DMatrix::zeros(10, 10);
 
@@ -25,7 +25,4 @@ fn main() {
             Some(&mut eig_vec_out),
         )
         .unwrap();
-
-    println!("Eigenvalues: {:.3}", eig_out);
-    println!("Eigenvectors: {:.3}", eig_vec_out);
 }

@@ -3,7 +3,10 @@ use std::sync::Arc;
 #[cfg(feature = "dynamic")]
 use libloading::Library;
 
-use crate::{blas::{BlasBackend, BlasLib}, error::LaError};
+use crate::{
+    blas::{BlasBackend, BlasLib},
+    error::LaError,
+};
 
 use super::{LapackeFunctions, LapackeFunctionsStatic};
 
@@ -47,9 +50,7 @@ pub(super) enum LapackeLibInner {
         blas_lapack_lib: BlasLib,
     },
     OpenBlas {
-        _blas_lib: BlasLib,
-        #[cfg(feature = "dynamic")]
-        lapack_lib: Arc<Library>,
+        blas_lapack_lib: BlasLib,
     },
     Static,
 }
@@ -61,14 +62,7 @@ impl LapackeLibInner {
                 blas_lapack_lib: blas.clone(),
             },
             BlasBackend::OpenBlas => Self::OpenBlas {
-                _blas_lib: blas.clone(),
-                #[cfg(feature = "dynamic")]
-                lapack_lib: {
-                    use crate::util::find_lib_path;
-
-                    let lib_path = find_lib_path("lapacke")?;
-                    Arc::new(unsafe { Library::new(lib_path) }?)
-                },
+                blas_lapack_lib: blas.clone(),
             },
             BlasBackend::Static => Self::Static,
         })
@@ -76,9 +70,10 @@ impl LapackeLibInner {
     #[cfg(feature = "dynamic")]
     fn lib(&self) -> Option<&Library> {
         match self {
-            Self::IntelMkl { blas_lapack_lib } => blas_lapack_lib.lib(),
-            Self::OpenBlas { lapack_lib, .. } => Some(&lapack_lib),
-            Self::Static => None
+            Self::IntelMkl { blas_lapack_lib } | Self::OpenBlas { blas_lapack_lib } => {
+                blas_lapack_lib.lib()
+            }
+            Self::Static => None,
         }
     }
 }
