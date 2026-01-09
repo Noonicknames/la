@@ -122,17 +122,34 @@ const BACKEND_PRIORITY: &[BlasBackend] = &[
 ];
 
 impl BlasLib {
-    pub fn new() -> Result<Self, LaError> {
-        let mut errors = Vec::new();
 
-        for backend in BACKEND_PRIORITY.iter() {
+    /// Create an instance of [BlasLib].
+    /// 
+    /// # Errors
+    /// Errors occur if no suitable backend is found.
+    /// From there, the error from the first attempt is returned.
+    pub fn new() -> Result<Self, LaError> {
+        let mut backend_iter = BACKEND_PRIORITY.iter();
+
+        let first_error;
+
+        if let Some(backend) = backend_iter.next() {
             match Self::with_backend(*backend) {
                 Ok(blas_lib) => return Ok(blas_lib),
-                Err(err) => errors.push(err),
+                Err(err) => first_error = err,
+            }
+        } else {
+            return Err(LaError::NoLaLibrary);
+        }
+
+        for backend in backend_iter {
+            match Self::with_backend(*backend) {
+                Ok(blas_lib) => return Ok(blas_lib),
+                Err(_err) => (),
             }
         }
 
-        Err(LaError::from_iter(errors))
+        Err(first_error)
     }
 
     #[cfg(feature = "dynamic")]
@@ -150,19 +167,33 @@ impl BlasLib {
     where
         P: AsRef<Path>,
     {
-        let mut errors = Vec::new();
+        let mut backend_iter = BACKEND_PRIORITY.iter();
 
-        for backend in BACKEND_PRIORITY.iter() {
+        let first_error;
+
+        if let Some(backend) = backend_iter.next() {
             match Self::with_backend_with_additional_search_paths(
                 *backend,
                 additional_search_paths.clone(),
             ) {
                 Ok(blas_lib) => return Ok(blas_lib),
-                Err(err) => errors.push(err),
+                Err(err) => first_error = err,
+            }
+        } else {
+            return Err(LaError::NoLaLibrary);
+        }
+
+        for backend in backend_iter {
+            match Self::with_backend_with_additional_search_paths(
+                *backend,
+                additional_search_paths.clone(),
+            ) {
+                Ok(blas_lib) => return Ok(blas_lib),
+                Err(_err) => (),
             }
         }
 
-        Err(LaError::from_iter(errors))
+        Err(first_error)
     }
 
     pub fn set_threading(&self, threading: Threading) {
